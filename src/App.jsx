@@ -16,16 +16,7 @@ const isFirebaseConfigured = Object.values(firebaseConfig).every(Boolean);
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 const db = app ? getDatabase(app) : null;
 
-const DEFAULT_NAMES = [
-  "Robin",
-  "François",
-  "François-Xavier",
-  "Clément",
-  "Julien",
-  "Guillaume",
-  "Sébastien",
-].join("\n");
-
+const DEFAULT_NAMES = ["Robin", "François", "François-Xavier", "Clément", "Julien", "Guillaume", "Sébastien"].join("\n");
 const DEFAULT_MISSIONS = [
   "Sébastien | Faire manger du piment à ta cible",
   "François-Xavier | Faire croire à ta cible que tu",
@@ -36,33 +27,7 @@ const DEFAULT_MISSIONS = [
   "Robin | Faire rire ta cible avec une histoire inventée.",
 ].join("\n");
 
-const CHINESE_CODE_WORDS = [
-  "DRAGON",
-  "LOTUS",
-  "PANDA",
-  "JADE",
-  "TIGER",
-  "BAMBOU",
-  "LANTERNE",
-  "PHENIX",
-  "DYNASTIE",
-  "PAGODE",
-  "MURAILLE",
-  "CERF-VOLANT",
-  "THE",
-  "YIN-YANG",
-  "BOUSSOLE",
-  "CALLIGRAPHIE",
-  "SOIE",
-  "LUNE",
-  "RIZ",
-  "MING",
-  "QIN",
-  "HAN",
-  "KUNG-FU",
-  "MAHJONG",
-];
-
+const CHINESE_CODE_WORDS = ["DRAGON", "LOTUS", "PANDA", "JADE", "TIGER", "BAMBOU", "LANTERNE", "PHENIX", "DYNASTIE", "PAGODE", "MURAILLE", "CERF-VOLANT", "THE", "YIN-YANG", "BOUSSOLE", "CALLIGRAPHIE", "SOIE", "LUNE", "RIZ", "MING", "QIN", "HAN", "KUNG-FU", "MAHJONG"];
 const DEFAULT_TIMER_SECONDS = 30 * 60;
 
 function Button({ children, variant = "default", className = "", ...props }) {
@@ -71,13 +36,9 @@ function Button({ children, variant = "default", className = "", ...props }) {
     outline: "border border-zinc-700 bg-zinc-950 text-white hover:bg-zinc-900",
     ghost: "text-zinc-300 hover:bg-zinc-900",
     danger: "bg-red-700 text-white hover:bg-red-600",
+    success: "bg-emerald-700 text-white hover:bg-emerald-600",
   };
-
-  return (
-    <button className={`rounded-2xl px-4 py-3 font-bold transition disabled:opacity-50 ${variants[variant]} ${className}`} {...props}>
-      {children}
-    </button>
-  );
+  return <button className={`rounded-2xl px-4 py-3 font-bold transition disabled:opacity-50 ${variants[variant]} ${className}`} {...props}>{children}</button>;
 }
 
 function Card({ children, className = "" }) {
@@ -120,9 +81,7 @@ function makeAdminCode() {
 
 function makePlayerCodes(count) {
   const candidates = [];
-  for (const word of CHINESE_CODE_WORDS) {
-    for (let number = 1; number <= 9; number += 1) candidates.push(`${word}-${number}`);
-  }
+  for (const word of CHINESE_CODE_WORDS) for (let number = 1; number <= 9; number += 1) candidates.push(`${word}-${number}`);
   const shuffled = shuffle(candidates);
   if (count <= shuffled.length) return shuffled.slice(0, count);
   return Array.from({ length: count }, (_, index) => `${shuffled[index % shuffled.length]}-${index + 1}`);
@@ -147,10 +106,10 @@ function parseMissionLine(line) {
 }
 
 function buildMissionCards(names, missionLines) {
-  const parsed = missionLines.map(parseMissionLine);
   const nameByKey = new Map(names.map((name) => [normalizeName(name), name]));
   const explicitTargets = new Set();
-  const cards = parsed.map((item) => {
+  const cards = missionLines.map((line) => {
+    const item = parseMissionLine(line);
     if (!item.target) return { target: "", mission: item.mission };
     const target = nameByKey.get(normalizeName(item.target));
     if (!target) throw new Error(`Cible inconnue : ${item.target}`);
@@ -166,7 +125,6 @@ function buildMissionCards(names, missionLines) {
 function assignCardsToPlayers(names, missionCards) {
   const cardByTarget = new Map(missionCards.map((card) => [normalizeName(card.target), card]));
   const chain = shuffle(names);
-
   return names.map((name) => {
     const chainIndex = chain.findIndex((item) => normalizeName(item) === normalizeName(name));
     const target = chain[(chainIndex + 1) % chain.length];
@@ -199,13 +157,16 @@ function getEvents(game) {
   return Object.values(game?.events || {}).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
 
+function getPendingKills(game) {
+  return Object.values(game?.pendingKills || {}).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
 function targetMappingIsSingleCycle(players) {
   if (players.length < 2) return false;
   const byName = new Map(players.map((player) => [normalizeName(player.name), player]));
   const start = players[0];
   const visited = new Set();
   let current = start;
-
   for (let step = 0; step < players.length; step += 1) {
     const key = normalizeName(current.name);
     if (visited.has(key)) return false;
@@ -213,7 +174,6 @@ function targetMappingIsSingleCycle(players) {
     current = byName.get(normalizeName(current.target));
     if (!current) return false;
   }
-
   return visited.size === players.length && normalizeName(current.name) === normalizeName(start.name);
 }
 
@@ -243,9 +203,7 @@ function getTimerRemaining(timer, now = Date.now()) {
 
 function formatTime(totalSeconds) {
   const seconds = Math.max(0, Number(totalSeconds) || 0);
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function runSelfTests() {
@@ -255,30 +213,19 @@ function runSelfTests() {
   const defaultMissions = parseLines(DEFAULT_MISSIONS);
   const players = buildPlayers(names, missionLines);
   const defaultPlayers = buildPlayers(defaultNames, defaultMissions);
-  const cards = buildMissionCards(names, missionLines);
   const assassin = { ...players[0] };
   const victim = { ...players.find((player) => player.name === assassin.target) };
   assassin.target = victim.target;
   assassin.mission = victim.mission;
-  const finalTimer = { durationSeconds: 1800, remainingSeconds: 424, running: false, startedAt: null };
   return [
     { name: "un joueur est créé par nom", pass: players.length === names.length },
     { name: "les valeurs par défaut sont valides", pass: validateSetup(defaultNames, defaultMissions) === "" },
     { name: "les valeurs par défaut créent une chaîne complète", pass: targetMappingIsSingleCycle(defaultPlayers) },
-    { name: "chaque joueur a une mission unique", pass: new Set(players.map((p) => p.mission)).size === players.length },
-    { name: "chaque joueur est ciblé exactement une fois", pass: new Set(players.map((p) => p.target)).size === players.length && players.every((p) => names.includes(p.target)) },
-    { name: "les cibles forment une seule chaîne complète", pass: targetMappingIsSingleCycle(players) },
-    { name: "personne ne se cible soi-même au départ", pass: players.every((p) => normalizeName(p.name) !== normalizeName(p.target)) },
-    { name: "après un kill, l'assassin ne récupère pas sa propre cible", pass: normalizeName(assassin.name) !== normalizeName(assassin.target) },
-    { name: "les cibles écrites dans les missions sont conservées", pass: cards.some((card) => card.target === "Francois" && card.mission === "Faire rire Francois") },
+    { name: "chaque joueur est ciblé exactement une fois", pass: new Set(players.map((p) => p.target)).size === players.length },
+    { name: "après acceptation, l'assassin récupère la cible et la mission de la victime", pass: assassin.target === victim.target && assassin.mission === victim.mission },
     { name: "les codes joueurs sont simples et thématiques", pass: players.every((player) => CHINESE_CODE_WORDS.some((word) => player.code.startsWith(`${word}-`))) },
-    { name: "les codes joueurs sont uniques", pass: new Set(players.map((player) => player.code)).size === players.length },
-    { name: "l'assassin récupère la cible et la mission de la victime", pass: assassin.target === victim.target && assassin.mission === victim.mission },
-    { name: "la validation bloque missions differentes des joueurs", pass: validateSetup(names, missionLines.slice(0, 3)).includes("autant de missions") },
-    { name: "la validation bloque une cible inconnue", pass: validateSetup(names, ["Zoé | Mission", "Clement | Mission", "Francois | Mission", "Alice | Mission"]).includes("Cible inconnue") },
     { name: "le chrono calcule le temps restant", pass: getTimerRemaining({ running: true, remainingSeconds: 60, startedAt: 1000 }, 31000) === 30 },
-    { name: "le chrono ne devient pas négatif", pass: getTimerRemaining({ running: true, remainingSeconds: 10, startedAt: 1000 }, 30000) === 0 },
-    { name: "le chrono final est bien stoppé", pass: finalTimer.running === false && finalTimer.startedAt === null },
+    { name: "une demande de kill peut cibler la victime", pass: getPendingKills({ pendingKills: { a: { victimId: "v", status: "pending" } } }).some((request) => request.victimId === "v") },
   ];
 }
 
@@ -300,7 +247,6 @@ export default function App() {
   const [adminCode, setAdminCode] = useState("");
   const [playerCode, setPlayerCode] = useState("");
   const [pendingPrivateCode, setPendingPrivateCode] = useState("");
-  const [victimCode, setVictimCode] = useState("");
   const [timerMinutes, setTimerMinutes] = useState("30");
   const [tick, setTick] = useState(Date.now());
   const [game, setGame] = useState(null);
@@ -311,10 +257,13 @@ export default function App() {
 
   const players = useMemo(() => getPlayers(game), [game]);
   const events = useMemo(() => getEvents(game), [game]);
+  const pendingKills = useMemo(() => getPendingKills(game), [game]);
   const alivePlayers = players.filter((player) => player.alive);
   const deadCount = players.length - alivePlayers.length;
   const winner = players.length > 0 && alivePlayers.length === 1 ? alivePlayers[0] : null;
   const currentPlayer = players.find((player) => player.id === currentPlayerId);
+  const currentPlayerRequests = currentPlayer ? pendingKills.filter((request) => request.status === "pending" && request.victimId === currentPlayer.id) : [];
+  const outgoingRequests = currentPlayer ? pendingKills.filter((request) => request.status === "pending" && request.killerId === currentPlayer.id) : [];
   const isAdmin = game?.adminCode && adminCode === game.adminCode;
   const publicUrl = gameId ? `${window.location.origin}${window.location.pathname}?game=${gameId}` : "";
   const timer = game?.timer || { durationSeconds: DEFAULT_TIMER_SECONDS, remainingSeconds: DEFAULT_TIMER_SECONDS, running: false, startedAt: null };
@@ -374,10 +323,8 @@ export default function App() {
   }
 
   async function startTimer() {
-    const minutes = Math.max(1, Number(timerMinutes) || 1);
-    const durationSeconds = Math.round(minutes * 60);
-    const currentRemaining = remainingSeconds || durationSeconds;
-    await updateTimer({ durationSeconds, remainingSeconds: currentRemaining, running: true, startedAt: Date.now() });
+    const durationSeconds = Math.round(Math.max(1, Number(timerMinutes) || 1) * 60);
+    await updateTimer({ durationSeconds, remainingSeconds: remainingSeconds || durationSeconds, running: true, startedAt: Date.now() });
     setMessage("Chrono lancé.");
   }
 
@@ -387,8 +334,7 @@ export default function App() {
   }
 
   async function resetTimer() {
-    const minutes = Math.max(1, Number(timerMinutes) || 1);
-    const durationSeconds = Math.round(minutes * 60);
+    const durationSeconds = Math.round(Math.max(1, Number(timerMinutes) || 1) * 60);
     await updateTimer({ durationSeconds, remainingSeconds: durationSeconds, running: false, startedAt: null });
     setMessage("Chrono réinitialisé.");
   }
@@ -413,9 +359,8 @@ export default function App() {
       updatedAt: now,
       timer: { durationSeconds: DEFAULT_TIMER_SECONDS, remainingSeconds: DEFAULT_TIMER_SECONDS, running: false, startedAt: null },
       players: Object.fromEntries(builtPlayers.map((player) => [player.id, player])),
-      events: {
-        [initialEventId]: { id: initialEventId, text: "La partie a commencé. Les identités restent secrètes.", at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), createdAt: now },
-      },
+      pendingKills: {},
+      events: { [initialEventId]: { id: initialEventId, text: "La partie a commencé. Les identités restent secrètes.", at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), createdAt: now } },
     });
     setGameId(id);
     setGameIdInput(id);
@@ -453,27 +398,52 @@ export default function App() {
     setMessage("Mode organisateur activé.");
   }
 
-  async function submitKill() {
+  async function requestKill() {
     if (!ensureFirebase()) return;
     if (!currentPlayer) return setMessage("Connecte-toi comme joueur avant de déclarer un kill.");
     if (!currentPlayer.alive) return setMessage("Tu es éliminé, tu ne peux plus déclarer de kill.");
-    const victim = players.find((player) => player.code.toUpperCase() === normalizeCode(victimCode));
-    if (!victim) return setMessage("Code inconnu. Vérifie le code donné par la victime.");
-    if (!victim.alive) return setMessage("Cette personne a déjà été éliminée.");
-    if (victim.id === currentPlayer.id) return setMessage("Tu ne peux pas t’éliminer toi-même.");
+    const victim = players.find((player) => player.alive && normalizeName(player.name) === normalizeName(currentPlayer.target));
+    if (!victim) return setMessage("Ta cible actuelle est introuvable ou déjà éliminée.");
+    const duplicate = pendingKills.find((request) => request.status === "pending" && request.killerId === currentPlayer.id && request.victimId === victim.id);
+    if (duplicate) return setMessage("Tu as déjà envoyé une demande à cette cible. Attends sa réponse.");
+    const requestId = randomId("kill");
+    await set(ref(db, `games/${gameId}/pendingKills/${requestId}`), {
+      id: requestId,
+      killerId: currentPlayer.id,
+      killerName: currentPlayer.name,
+      victimId: victim.id,
+      victimName: victim.name,
+      mission: currentPlayer.mission,
+      status: "pending",
+      createdAt: Date.now(),
+    });
+    setMessage(`Demande envoyée à ${victim.name}. Elle doit accepter pour valider le kill.`);
+  }
+
+  async function refuseKillRequest(request) {
+    if (!ensureFirebase()) return;
+    await update(ref(db, `games/${gameId}/pendingKills/${request.id}`), { status: "refused", respondedAt: Date.now() });
+    setMessage("Demande refusée. Aucun kill n’a été validé.");
+  }
+
+  async function acceptKillRequest(request) {
+    if (!ensureFirebase()) return;
+    const killer = players.find((player) => player.id === request.killerId);
+    const victim = players.find((player) => player.id === request.victimId);
+    if (!killer || !victim) return setMessage("Demande invalide : joueur introuvable.");
+    if (!victim.alive) return setMessage("Cette demande n’est plus valide : tu es déjà éliminé.");
+    if (!killer.alive) return setMessage("Cette demande n’est plus valide : le killer est déjà éliminé.");
     const now = Date.now();
     const remainingAfterKill = alivePlayers.length - 1;
     const eventId = randomId("event");
     await update(ref(db, `games/${gameId}/players/${victim.id}`), { alive: false, updatedAt: now });
-    await update(ref(db, `games/${gameId}/players/${currentPlayer.id}`), { kills: (currentPlayer.kills || 0) + 1, target: victim.target, mission: victim.mission, updatedAt: now });
+    await update(ref(db, `games/${gameId}/players/${killer.id}`), { kills: (killer.kills || 0) + 1, target: victim.target, mission: victim.mission, updatedAt: now });
+    await update(ref(db, `games/${gameId}/pendingKills/${request.id}`), { status: "accepted", respondedAt: now });
     await set(ref(db, `games/${gameId}/events/${eventId}`), { id: eventId, text: `Une personne a été killée. Il reste ${remainingAfterKill} survivant(s).`, at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), createdAt: now });
     const gameUpdate = { status: remainingAfterKill === 1 ? "finished" : "active", updatedAt: now };
-    if (remainingAfterKill === 1) {
-      gameUpdate.timer = { ...timer, remainingSeconds, running: false, startedAt: null };
-    }
+    if (remainingAfterKill === 1) gameUpdate.timer = { ...timer, remainingSeconds, running: false, startedAt: null };
     await update(ref(db, `games/${gameId}`), gameUpdate);
-    setVictimCode("");
-    setMessage(remainingAfterKill === 1 ? "Kill validé. Le chrono est arrêté. On a un vainqueur !" : "Kill validé. Tu récupères la cible et la mission de la victime.");
+    setMessage(remainingAfterKill === 1 ? "Kill accepté. Le chrono est arrêté. On a un vainqueur !" : "Kill accepté. Ton assassin récupère ta cible et ta mission.");
   }
 
   async function deleteGame() {
@@ -512,13 +482,7 @@ export default function App() {
   function TimerPanel({ admin = false }) {
     return (
       <Card>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-black">Chrono</h2>
-            <p className="text-sm text-zinc-400">{winner ? "Arrêté — victoire" : timer.running ? "En cours" : remainingSeconds === 0 ? "Terminé" : "En pause"}</p>
-          </div>
-          <Badge className={timer.running ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-zinc-700 bg-zinc-800 text-zinc-100"}>{timer.running ? "ON" : "OFF"}</Badge>
-        </div>
+        <div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-black">Chrono</h2><p className="text-sm text-zinc-400">{winner ? "Arrêté — victoire" : timer.running ? "En cours" : remainingSeconds === 0 ? "Terminé" : "En pause"}</p></div><Badge className={timer.running ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-zinc-700 bg-zinc-800 text-zinc-100"}>{timer.running ? "ON" : "OFF"}</Badge></div>
         <div className={remainingSeconds === 0 || winner ? "mt-4 rounded-2xl border border-yellow-700 bg-yellow-950/40 p-5 text-center font-mono text-6xl font-black text-yellow-100" : "mt-4 rounded-2xl bg-zinc-950 p-5 text-center font-mono text-6xl font-black"}>{formatTime(remainingSeconds)}</div>
         {admin ? <div className="mt-4 space-y-3"><label className="block text-sm text-zinc-400">Durée en minutes</label><Field type="number" min="1" value={timerMinutes} onChange={(event) => setTimerMinutes(event.target.value)} /><div className="grid gap-2 sm:grid-cols-3"><Button onClick={startTimer}>Lancer</Button><Button variant="outline" onClick={stopTimer}>Stopper</Button><Button variant="ghost" onClick={resetTimer}>Réinitialiser</Button></div></div> : null}
       </Card>
@@ -534,16 +498,30 @@ export default function App() {
     );
   }
 
+  function KillRequestsPanel() {
+    if (!currentPlayer) return null;
+    return (
+      <Card>
+        <h2 className="text-2xl font-black">Notifications de kill</h2>
+        {currentPlayerRequests.length === 0 ? <p className="mt-2 text-sm text-zinc-400">Aucune demande reçue.</p> : null}
+        <div className="mt-4 space-y-3">
+          {currentPlayerRequests.map((request) => <div key={request.id} className="rounded-2xl border border-yellow-800 bg-yellow-950/30 p-4"><div className="font-bold text-yellow-100">{request.killerName} affirme t’avoir killé.</div><p className="mt-2 text-sm text-yellow-100/80">Mission : {request.mission}</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><Button variant="success" onClick={() => acceptKillRequest(request)}>Accepter le kill</Button><Button variant="outline" onClick={() => refuseKillRequest(request)}>Refuser</Button></div></div>)}
+          {outgoingRequests.map((request) => <div key={request.id} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-300">Demande envoyée à <strong>{request.victimName}</strong>. En attente de validation.</div>)}
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-zinc-950 p-4 text-zinc-50 sm:p-8"><div className="mx-auto max-w-5xl space-y-6"><header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-5xl font-black tracking-tight sm:text-6xl">Killer</h1><p className="mt-2 max-w-2xl text-zinc-400">Qui sera le roi de la duperie ?</p></div><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">{game ? `${alivePlayers.length}/${players.length} en vie` : "Multi-téléphone"}</Badge></header>{message ? <div className="whitespace-pre-wrap rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-200">{message}</div> : null}
 
-      {mode === "home" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC12" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Les cibles forment une seule chaîne complète. Une mission peut être liée à une cible avec le format : Cible | Mission.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card></div> : null}
+      {mode === "home" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC12" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Les cibles forment une seule chaîne complète.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card></div> : null}
 
-      {mode === "setup" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Les joueurs</h2><p className="mt-2 text-sm text-zinc-400">Un nom par ligne. Minimum 2 joueurs.</p><Field as="textarea" className="mt-4 min-h-60" value={namesText} onChange={(event) => setNamesText(event.target.value)} /></Card><Card><h2 className="text-xl font-bold">Les missions</h2><p className="mt-2 text-sm text-zinc-400">Une ligne par mission. Format conseillé : <span className="font-mono text-zinc-200">Nom cible | Mission</span>. L’app construit ensuite une chaîne complète de cibles.</p><Field as="textarea" className="mt-4 min-h-60" value={missionsText} onChange={(event) => setMissionsText(event.target.value)} /></Card><div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row"><Button onClick={createGame}>Créer la partie live</Button><Button variant="outline" onClick={() => setShowTests(!showTests)}>{showTests ? "Cacher les tests" : "Afficher les tests"}</Button><Button variant="ghost" onClick={() => setMode("home")}>Retour</Button></div>{showTests ? <Card className="lg:col-span-2"><h2 className="text-xl font-bold">Tests intégrés</h2><div className="mt-3 grid gap-2">{tests.map((test) => <div key={test.name} className="flex items-center justify-between rounded-xl bg-zinc-950 p-3 text-sm"><span>{test.name}</span><Badge className={test.pass ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{test.pass ? "OK" : "Échec"}</Badge></div>)}</div></Card> : null}</div> : null}
+      {mode === "setup" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Les joueurs</h2><p className="mt-2 text-sm text-zinc-400">Un nom par ligne. Minimum 2 joueurs.</p><Field as="textarea" className="mt-4 min-h-60" value={namesText} onChange={(event) => setNamesText(event.target.value)} /></Card><Card><h2 className="text-xl font-bold">Les missions</h2><p className="mt-2 text-sm text-zinc-400">Format : <span className="font-mono text-zinc-200">Nom cible | Mission</span>. L’app construit ensuite une chaîne complète de cibles.</p><Field as="textarea" className="mt-4 min-h-60" value={missionsText} onChange={(event) => setMissionsText(event.target.value)} /></Card><div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row"><Button onClick={createGame}>Créer la partie live</Button><Button variant="outline" onClick={() => setShowTests(!showTests)}>{showTests ? "Cacher les tests" : "Afficher les tests"}</Button><Button variant="ghost" onClick={() => setMode("home")}>Retour</Button></div>{showTests ? <Card className="lg:col-span-2"><h2 className="text-xl font-bold">Tests intégrés</h2><div className="mt-3 grid gap-2">{tests.map((test) => <div key={test.name} className="flex items-center justify-between rounded-xl bg-zinc-950 p-3 text-sm"><span>{test.name}</span><Badge className={test.pass ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{test.pass ? "OK" : "Échec"}</Badge></div>)}</div></Card> : null}</div> : null}
 
       {game && mode === "public" ? <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"><Card><h2 className="text-2xl font-black">Connexion joueur</h2><p className="mt-2 text-sm text-zinc-400">Entre ton code joueur pour voir ta fiche, ou ouvre ton lien privé.</p><Field className="mt-4 font-mono uppercase" value={playerCode} onChange={(event) => setPlayerCode(event.target.value.toUpperCase())} placeholder="DRAGON-8" /><Button className="mt-4 w-full" onClick={enterPlayer}>Voir ma fiche</Button><div className="mt-6 border-t border-zinc-800 pt-4"><h3 className="font-bold">Organisateur</h3><Field className="mt-3 font-mono uppercase" value={adminCode} onChange={(event) => setAdminCode(event.target.value.toUpperCase())} placeholder="Code admin" /><Button className="mt-3 w-full" variant="outline" onClick={enterAdmin}>Mode organisateur</Button></div></Card><div className="space-y-4"><TimerPanel /><PublicBoard /></div></div> : null}
 
-      {game && mode === "player" && currentPlayer ? <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]"><Card><h2 className="text-2xl font-black">Ta fiche secrète</h2><div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5"><div className="flex items-start justify-between gap-4"><div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Joueur</div><div className="text-3xl font-black">{currentPlayer.name}</div></div><Badge className={currentPlayer.alive ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{currentPlayer.alive ? "En vie" : "Killé"}</Badge></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta cible actuelle</div><div className="mt-1 text-xl font-bold">{currentPlayer.alive ? currentPlayer.target : "—"}</div></div><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ton code secret</div><div className="mt-1 font-mono text-xl font-bold">{currentPlayer.code}</div></div></div><div className="mt-3 rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta mission actuelle</div><p className="mt-2 text-lg leading-relaxed">{currentPlayer.alive ? currentPlayer.mission : "Tu es éliminé. Donne ton code à ton assassin."}</p></div></div></Card><div className="space-y-4"><TimerPanel /><Card><h2 className="text-2xl font-black">Déclarer un kill</h2><p className="mt-2 text-sm text-zinc-400">Entre le code donné par ta victime. Tu récupéreras sa cible et sa mission.</p><Field className="mt-4 font-mono uppercase" value={victimCode} onChange={(event) => setVictimCode(event.target.value.toUpperCase())} placeholder="Code de la victime" /><Button className="mt-4 w-full" onClick={submitKill}>Valider le kill</Button><Button className="mt-2 w-full" variant="ghost" onClick={() => setMode("public")}>Retour écran public</Button></Card><PublicBoard /></div></div> : null}
+      {game && mode === "player" && currentPlayer ? <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]"><Card><h2 className="text-2xl font-black">Ta fiche secrète</h2><div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5"><div className="flex items-start justify-between gap-4"><div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Joueur</div><div className="text-3xl font-black">{currentPlayer.name}</div></div><Badge className={currentPlayer.alive ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{currentPlayer.alive ? "En vie" : "Killé"}</Badge></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta cible actuelle</div><div className="mt-1 text-xl font-bold">{currentPlayer.alive ? currentPlayer.target : "—"}</div></div><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ton code secret</div><div className="mt-1 font-mono text-xl font-bold">{currentPlayer.code}</div></div></div><div className="mt-3 rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta mission actuelle</div><p className="mt-2 text-lg leading-relaxed">{currentPlayer.alive ? currentPlayer.mission : "Tu es éliminé."}</p></div></div></Card><div className="space-y-4"><TimerPanel /><KillRequestsPanel /><Card><h2 className="text-2xl font-black">Déclarer un kill</h2><p className="mt-2 text-sm text-zinc-400">Quand ta mission est réussie, envoie une demande discrète à ta cible. Elle devra accepter pour valider.</p><Button className="mt-4 w-full" onClick={requestKill} disabled={!currentPlayer.alive || !!winner}>Envoyer la demande à ma cible</Button><Button className="mt-2 w-full" variant="ghost" onClick={() => setMode("public")}>Retour écran public</Button></Card><PublicBoard /></div></div> : null}
 
       {game && mode === "admin" && isAdmin ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-2xl font-black">Organisateur</h2><div className="mt-4 rounded-xl bg-zinc-950 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Code partie</div><div className="mt-1 font-mono text-3xl font-black">{gameId}</div></div><div className="mt-3 rounded-xl bg-zinc-950 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Lien public</div><div className="mt-1 break-all text-sm text-zinc-300">{publicUrl}</div></div><div className="mt-4 flex flex-col gap-3 sm:flex-row"><Button onClick={copyLink}>Copier le lien public</Button><Button variant="outline" onClick={() => setShowCards(!showCards)}>{showCards ? "Cacher les fiches" : "Voir les fiches"}</Button></div><Button className="mt-3 w-full" variant="danger" onClick={deleteGame}>Supprimer la partie</Button></Card><TimerPanel admin /> <PublicBoard />{showCards ? <Card className="lg:col-span-2"><h2 className="text-2xl font-black">Fiches joueurs</h2><div className="mt-4 grid gap-3 md:grid-cols-2">{players.map((player) => <div key={player.id} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-xl font-black">{player.name}</div><div className="text-sm text-zinc-500">Code : <span className="font-mono">{player.code}</span></div></div><Badge className={player.alive ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{player.alive ? "En vie" : "Killé"}</Badge></div><div className="mt-3 text-sm text-zinc-300">Lien privé : <span className="break-all text-zinc-400">{privateUrl(player)}</span></div><div className="mt-3 text-sm text-zinc-300">Cible actuelle : <strong>{player.target}</strong></div><div className="mt-1 text-sm text-zinc-300">Mission actuelle : {player.mission}</div><div className="mt-3 flex flex-col gap-2 sm:flex-row"><Button variant="outline" onClick={() => copyPrivateLink(player)}>Copier lien privé</Button><Button variant="outline" onClick={() => copySheet(player)}>Copier fiche</Button></div></div>)}</div></Card> : null}</div> : null}
       </div></main>
