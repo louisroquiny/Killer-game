@@ -18,13 +18,13 @@ const db = app ? getDatabase(app) : null;
 
 const DEFAULT_NAMES = ["Robin", "François", "François-Xavier", "Clément", "Julien", "Guillaume", "Sébastien"].join("\n");
 const DEFAULT_MISSIONS = [
-  "Sébastien | Faire manger du piment à ta cible",
-  "François-Xavier | Faire croire à ta cible que tu",
+  "Robin | Aider ta cible à tricher pendant une partie.",
+  "François | Obtenir de ta cible un top de ces animaux pref.",
+  "François-Xavier | Faire croire à ta cible que tu viens d'acheter un cochon",
   "Clément | Faire signer ou dessiner quelque chose à ta cible.",
-  "François | Faire prononcer le mot ‘duperie’ à ta cible.",
-  "Julien | Obtenir un selfie avec ta cible.",
+  "Julien | Obtenir un selfie avec ta cible tirant la langue.",
   "Guillaume | Faire porter un accessoire à ta cible pendant 30 secondes.",
-  "Robin | Faire rire ta cible avec une histoire inventée.",
+  "Sébastien | Faire manger du piment à ta cible",
 ].join("\n");
 
 const CHINESE_CODE_WORDS = ["DRAGON", "LOTUS", "PANDA", "JADE", "TIGER", "BAMBOU", "LANTERNE", "PHENIX", "DYNASTIE", "PAGODE", "MURAILLE", "CERF-VOLANT", "THE", "YIN-YANG", "BOUSSOLE", "CALLIGRAPHIE", "SOIE", "LUNE", "RIZ", "MING", "QIN", "HAN", "KUNG-FU", "MAHJONG"];
