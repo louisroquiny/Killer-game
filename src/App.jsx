@@ -27,7 +27,11 @@ const DEFAULT_MISSIONS = [
   "Sébastien | Faire manger du piment à ta cible",
 ].join("\n");
 
-const CHINESE_CODE_WORDS = ["DRAGON", "LOTUS", "PANDA", "JADE", "TIGER", "BAMBOU", "LANTERNE", "PHENIX", "DYNASTIE", "PAGODE", "MURAILLE", "CERF-VOLANT", "THE", "YIN-YANG", "BOUSSOLE", "CALLIGRAPHIE", "SOIE", "LUNE", "RIZ", "MING", "QIN", "HAN", "KUNG-FU", "MAHJONG"];
+const CHINESE_CODE_WORDS = [
+  "DRAGON", "LOTUS", "PANDA", "JADE", "TIGER", "BAMBOU", "LANTERNE", "PHENIX",
+  "DYNASTIE", "PAGODE", "MURAILLE", "CERF-VOLANT", "THE", "YIN-YANG", "BOUSSOLE",
+  "CALLIGRAPHIE", "SOIE", "LUNE", "RIZ", "MING", "QIN", "HAN", "KUNG-FU", "MAHJONG",
+];
 const DEFAULT_TIMER_SECONDS = 30 * 60;
 
 function Button({ children, variant = "default", className = "", ...props }) {
@@ -81,7 +85,9 @@ function makeAdminCode() {
 
 function makePlayerCodes(count) {
   const candidates = [];
-  for (const word of CHINESE_CODE_WORDS) for (let number = 1; number <= 9; number += 1) candidates.push(`${word}-${number}`);
+  for (const word of CHINESE_CODE_WORDS) {
+    for (let number = 1; number <= 9; number += 1) candidates.push(`${word}-${number}`);
+  }
   const shuffled = shuffle(candidates);
   if (count <= shuffled.length) return shuffled.slice(0, count);
   return Array.from({ length: count }, (_, index) => `${shuffled[index % shuffled.length]}-${index + 1}`);
@@ -213,6 +219,7 @@ function runSelfTests() {
   const defaultMissions = parseLines(DEFAULT_MISSIONS);
   const players = buildPlayers(names, missionLines);
   const defaultPlayers = buildPlayers(defaultNames, defaultMissions);
+  const timeoutWinners = players.filter((player) => player.alive);
   const assassin = { ...players[0] };
   const victim = { ...players.find((player) => player.name === assassin.target) };
   assassin.target = victim.target;
@@ -226,6 +233,7 @@ function runSelfTests() {
     { name: "les codes joueurs sont simples et thématiques", pass: players.every((player) => CHINESE_CODE_WORDS.some((word) => player.code.startsWith(`${word}-`))) },
     { name: "le chrono calcule le temps restant", pass: getTimerRemaining({ running: true, remainingSeconds: 60, startedAt: 1000 }, 31000) === 30 },
     { name: "une demande de kill peut cibler la victime", pass: getPendingKills({ pendingKills: { a: { victimId: "v", status: "pending" } } }).some((request) => request.victimId === "v") },
+    { name: "le chrono peut déclarer plusieurs survivants vainqueurs", pass: timeoutWinners.length > 1 },
   ];
 }
 
@@ -260,7 +268,10 @@ export default function App() {
   const pendingKills = useMemo(() => getPendingKills(game), [game]);
   const alivePlayers = players.filter((player) => player.alive);
   const deadCount = players.length - alivePlayers.length;
-  const winner = players.length > 0 && alivePlayers.length === 1 ? alivePlayers[0] : null;
+  const singleWinner = players.length > 0 && alivePlayers.length === 1 ? alivePlayers[0] : null;
+  const timeoutFinished = game?.status === "finished_timeout";
+  const finalWinners = timeoutFinished ? alivePlayers : singleWinner ? [singleWinner] : [];
+  const hasFinalWinners = finalWinners.length > 0;
   const currentPlayer = players.find((player) => player.id === currentPlayerId);
   const currentPlayerRequests = currentPlayer ? pendingKills.filter((request) => request.status === "pending" && request.victimId === currentPlayer.id) : [];
   const outgoingRequests = currentPlayer ? pendingKills.filter((request) => request.status === "pending" && request.killerId === currentPlayer.id) : [];
@@ -305,10 +316,29 @@ export default function App() {
     setMessage(`Bienvenue ${player.name}.`);
   }, [pendingPrivateCode, players]);
 
+  useEffect(() => {
+    if (!db || !gameId || !game || game.status !== "active") return;
+    if (!timer.running || remainingSeconds > 0 || alivePlayers.length <= 1) return;
+    update(ref(db, `games/${gameId}`), {
+      status: "finished_timeout",
+      timer: { ...timer, remainingSeconds: 0, running: false, startedAt: null },
+      updatedAt: Date.now(),
+    });
+  }, [gameId, game?.status, timer.running, remainingSeconds, alivePlayers.length]);
+
   function ensureFirebase() {
     if (db) return true;
     setMessage("Firebase n'est pas configuré. Ajoute les variables VITE_FIREBASE_* dans Vercel ou dans ton fichier .env.local.");
     return false;
+  }
+
+  function goToPublicGame() {
+    if (!gameId) {
+      setMode("home");
+      return;
+    }
+    setMode("public");
+    window.history.replaceState({}, "", `?game=${gameId}`);
   }
 
   function privateUrl(player) {
@@ -319,7 +349,7 @@ export default function App() {
   async function updateTimer(nextTimer) {
     if (!ensureFirebase()) return;
     if (!gameId || !isAdmin) return setMessage("Seul l’organisateur peut modifier le chrono.");
-    await update(ref(db, `games/${gameId}`), { timer: nextTimer, updatedAt: Date.now() });
+    await update(ref(db, `games/${gameId}`), { timer: nextTimer, updatedAt: Date.now(), status: game?.status === "finished_timeout" ? "active" : game?.status });
   }
 
   async function startTimer() {
@@ -417,7 +447,7 @@ export default function App() {
       status: "pending",
       createdAt: Date.now(),
     });
-    setMessage(`Demande envoyée à ${victim.name}. Elle doit accepter pour valider le kill.`);
+    setMessage("");
   }
 
   async function refuseKillRequest(request) {
@@ -482,8 +512,14 @@ export default function App() {
   function TimerPanel({ admin = false }) {
     return (
       <Card>
-        <div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-black">Chrono</h2><p className="text-sm text-zinc-400">{winner ? "Arrêté — victoire" : timer.running ? "En cours" : remainingSeconds === 0 ? "Terminé" : "En pause"}</p></div><Badge className={timer.running ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-zinc-700 bg-zinc-800 text-zinc-100"}>{timer.running ? "ON" : "OFF"}</Badge></div>
-        <div className={remainingSeconds === 0 || winner ? "mt-4 rounded-2xl border border-yellow-700 bg-yellow-950/40 p-5 text-center font-mono text-6xl font-black text-yellow-100" : "mt-4 rounded-2xl bg-zinc-950 p-5 text-center font-mono text-6xl font-black"}>{formatTime(remainingSeconds)}</div>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-black">Chrono</h2>
+            <p className="text-sm text-zinc-400">{hasFinalWinners ? "Arrêté — victoire" : timer.running ? "En cours" : remainingSeconds === 0 ? "Terminé" : "En pause"}</p>
+          </div>
+          <Badge className={timer.running ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-zinc-700 bg-zinc-800 text-zinc-100"}>{timer.running ? "ON" : "OFF"}</Badge>
+        </div>
+        <div className={remainingSeconds === 0 || hasFinalWinners ? "mt-4 rounded-2xl border border-yellow-700 bg-yellow-950/40 p-5 text-center font-mono text-6xl font-black text-yellow-100" : "mt-4 rounded-2xl bg-zinc-950 p-5 text-center font-mono text-6xl font-black"}>{formatTime(remainingSeconds)}</div>
         {admin ? <div className="mt-4 space-y-3"><label className="block text-sm text-zinc-400">Durée en minutes</label><Field type="number" min="1" value={timerMinutes} onChange={(event) => setTimerMinutes(event.target.value)} /><div className="grid gap-2 sm:grid-cols-3"><Button onClick={startTimer}>Lancer</Button><Button variant="outline" onClick={stopTimer}>Stopper</Button><Button variant="ghost" onClick={resetTimer}>Réinitialiser</Button></div></div> : null}
       </Card>
     );
@@ -493,7 +529,7 @@ export default function App() {
     return (
       <Card>
         <div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-black">Écran public</h2><p className="text-sm text-zinc-400">Code partie : <span className="font-mono text-zinc-200">{gameId || "—"}</span></p></div><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">Live</Badge></div>
-        {winner ? <div className="mt-5 rounded-3xl border border-yellow-600 bg-yellow-950/50 p-6 text-center text-yellow-100"><div className="text-5xl">👑</div><div className="mt-3 text-sm uppercase tracking-[0.35em] text-yellow-300/80">Vainqueur</div><div className="mt-2 text-5xl font-black">{winner.name}</div><p className="mt-3 text-sm text-yellow-100/80">Le chrono est arrêté. La duperie a son roi.</p></div> : <><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{alivePlayers.length}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">survivants</div></div><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{deadCount}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">kills</div></div></div><div className="mt-4 space-y-2">{events.length === 0 ? <p className="text-sm text-zinc-500">Aucun événement pour l’instant.</p> : null}{events.map((event) => <div key={event.id} className="rounded-xl bg-zinc-950 p-3 text-sm"><span className="text-zinc-500">{event.at}</span> — {event.text}</div>)}</div></>}
+        {hasFinalWinners ? <div className="mt-5 rounded-3xl border border-yellow-600 bg-yellow-950/50 p-6 text-center text-yellow-100"><div className="text-5xl">👑</div><div className="mt-3 text-sm uppercase tracking-[0.35em] text-yellow-300/80">{finalWinners.length > 1 ? "Vainqueurs" : "Vainqueur"}</div><div className="mt-2 text-5xl font-black">{finalWinners.map((player) => player.name).join(" · ")}</div><p className="mt-3 text-sm text-yellow-100/80">{timeoutFinished ? "Le chrono est terminé. Les derniers survivants remportent la partie." : "Le chrono est arrêté. La duperie a son roi."}</p></div> : <><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{alivePlayers.length}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">survivants</div></div><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{deadCount}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">kills</div></div></div><div className="mt-4 space-y-2">{events.length === 0 ? <p className="text-sm text-zinc-500">Aucun événement pour l’instant.</p> : null}{events.map((event) => <div key={event.id} className="rounded-xl bg-zinc-950 p-3 text-sm"><span className="text-zinc-500">{event.at}</span> — {event.text}</div>)}</div></>}
       </Card>
     );
   }
@@ -513,7 +549,7 @@ export default function App() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 p-4 text-zinc-50 sm:p-8"><div className="mx-auto max-w-5xl space-y-6"><header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-5xl font-black tracking-tight sm:text-6xl">Killer</h1><p className="mt-2 max-w-2xl text-zinc-400">Qui sera le roi de la duperie ?</p></div><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">{game ? `${alivePlayers.length}/${players.length} en vie` : "Multi-téléphone"}</Badge></header>{message ? <div className="whitespace-pre-wrap rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-200">{message}</div> : null}
+    <main className="min-h-screen bg-zinc-950 p-4 text-zinc-50 sm:p-8"><div className="mx-auto max-w-5xl space-y-6"><header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><button type="button" onClick={goToPublicGame} className="text-left text-5xl font-black tracking-tight sm:text-6xl">Killer</button><p className="mt-2 max-w-2xl text-zinc-400">Qui sera le roi de la duperie ?</p></div><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">{game ? `${alivePlayers.length}/${players.length} en vie` : "Multi-téléphone"}</Badge></header>{message ? <div className="whitespace-pre-wrap rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-200">{message}</div> : null}
 
       {mode === "home" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC12" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Les cibles forment une seule chaîne complète.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card></div> : null}
 
@@ -521,7 +557,7 @@ export default function App() {
 
       {game && mode === "public" ? <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"><Card><h2 className="text-2xl font-black">Connexion joueur</h2><p className="mt-2 text-sm text-zinc-400">Entre ton code joueur pour voir ta fiche, ou ouvre ton lien privé.</p><Field className="mt-4 font-mono uppercase" value={playerCode} onChange={(event) => setPlayerCode(event.target.value.toUpperCase())} placeholder="DRAGON-8" /><Button className="mt-4 w-full" onClick={enterPlayer}>Voir ma fiche</Button><div className="mt-6 border-t border-zinc-800 pt-4"><h3 className="font-bold">Organisateur</h3><Field className="mt-3 font-mono uppercase" value={adminCode} onChange={(event) => setAdminCode(event.target.value.toUpperCase())} placeholder="Code admin" /><Button className="mt-3 w-full" variant="outline" onClick={enterAdmin}>Mode organisateur</Button></div></Card><div className="space-y-4"><TimerPanel /><PublicBoard /></div></div> : null}
 
-      {game && mode === "player" && currentPlayer ? <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]"><Card><h2 className="text-2xl font-black">Ta fiche secrète</h2><div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5"><div className="flex items-start justify-between gap-4"><div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Joueur</div><div className="text-3xl font-black">{currentPlayer.name}</div></div><Badge className={currentPlayer.alive ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{currentPlayer.alive ? "En vie" : "Killé"}</Badge></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta cible actuelle</div><div className="mt-1 text-xl font-bold">{currentPlayer.alive ? currentPlayer.target : "—"}</div></div><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ton code secret</div><div className="mt-1 font-mono text-xl font-bold">{currentPlayer.code}</div></div></div><div className="mt-3 rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta mission actuelle</div><p className="mt-2 text-lg leading-relaxed">{currentPlayer.alive ? currentPlayer.mission : "Tu es éliminé."}</p></div></div></Card><div className="space-y-4"><TimerPanel /><KillRequestsPanel /><Card><h2 className="text-2xl font-black">Déclarer un kill</h2><p className="mt-2 text-sm text-zinc-400">Quand ta mission est réussie, envoie une demande discrète à ta cible. Elle devra accepter pour valider.</p><Button className="mt-4 w-full" onClick={requestKill} disabled={!currentPlayer.alive || !!winner}>Envoyer la demande à ma cible</Button><Button className="mt-2 w-full" variant="ghost" onClick={() => setMode("public")}>Retour écran public</Button></Card><PublicBoard /></div></div> : null}
+      {game && mode === "player" && currentPlayer ? <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]"><div className="space-y-4"><Card><h2 className="text-2xl font-black">Ta fiche secrète</h2><div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5"><div className="flex items-start justify-between gap-4"><div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Joueur</div><div className="text-3xl font-black">{currentPlayer.name}</div></div><Badge className={currentPlayer.alive ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{currentPlayer.alive ? "En vie" : "Killé"}</Badge></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta cible actuelle</div><div className="mt-1 text-xl font-bold">{currentPlayer.alive ? currentPlayer.target : "—"}</div></div><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ton code secret</div><div className="mt-1 font-mono text-xl font-bold">{currentPlayer.code}</div></div></div><div className="mt-3 rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta mission actuelle</div><p className="mt-2 text-lg leading-relaxed">{currentPlayer.alive ? currentPlayer.mission : "Tu es éliminé."}</p></div></div></Card><PublicBoard /></div><div className="space-y-4"><TimerPanel /><KillRequestsPanel /><Card><h2 className="text-2xl font-black">Déclarer un kill</h2><p className="mt-2 text-sm text-zinc-400">Quand ta mission est réussie, envoie une demande discrète à ta cible. Elle devra accepter pour valider.</p><Button className="mt-4 w-full" onClick={requestKill} disabled={!currentPlayer.alive || hasFinalWinners}>Envoyer la demande à ma cible</Button><Button className="mt-2 w-full" variant="ghost" onClick={() => setMode("public")}>Retour écran public</Button></Card></div></div> : null}
 
       {game && mode === "admin" && isAdmin ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-2xl font-black">Organisateur</h2><div className="mt-4 rounded-xl bg-zinc-950 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Code partie</div><div className="mt-1 font-mono text-3xl font-black">{gameId}</div></div><div className="mt-3 rounded-xl bg-zinc-950 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Lien public</div><div className="mt-1 break-all text-sm text-zinc-300">{publicUrl}</div></div><div className="mt-4 flex flex-col gap-3 sm:flex-row"><Button onClick={copyLink}>Copier le lien public</Button><Button variant="outline" onClick={() => setShowCards(!showCards)}>{showCards ? "Cacher les fiches" : "Voir les fiches"}</Button></div><Button className="mt-3 w-full" variant="danger" onClick={deleteGame}>Supprimer la partie</Button></Card><TimerPanel admin /> <PublicBoard />{showCards ? <Card className="lg:col-span-2"><h2 className="text-2xl font-black">Fiches joueurs</h2><div className="mt-4 grid gap-3 md:grid-cols-2">{players.map((player) => <div key={player.id} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-xl font-black">{player.name}</div><div className="text-sm text-zinc-500">Code : <span className="font-mono">{player.code}</span></div></div><Badge className={player.alive ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{player.alive ? "En vie" : "Killé"}</Badge></div><div className="mt-3 text-sm text-zinc-300">Lien privé : <span className="break-all text-zinc-400">{privateUrl(player)}</span></div><div className="mt-3 text-sm text-zinc-300">Cible actuelle : <strong>{player.target}</strong></div><div className="mt-1 text-sm text-zinc-300">Mission actuelle : {player.mission}</div><div className="mt-3 flex flex-col gap-2 sm:flex-row"><Button variant="outline" onClick={() => copyPrivateLink(player)}>Copier lien privé</Button><Button variant="outline" onClick={() => copySheet(player)}>Copier fiche</Button></div></div>)}</div></Card> : null}</div> : null}
       </div></main>
