@@ -156,11 +156,16 @@ function buildMissionCards(names, missionLines) {
 }
 
 function assignCardsToPlayers(names, missionCards) {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const cards = shuffle(missionCards);
-    if (cards.every((card, index) => normalizeName(card.target) !== normalizeName(names[index]))) return cards;
-  }
-  throw new Error("Impossible d’attribuer les missions sans qu’un joueur se cible lui-même. Essaie de modifier une cible de mission.");
+  const cardByTarget = new Map(missionCards.map((card) => [normalizeName(card.target), card]));
+  const chain = shuffle(names);
+
+  return names.map((name) => {
+    const chainIndex = chain.findIndex((item) => normalizeName(item) === normalizeName(name));
+    const target = chain[(chainIndex + 1) % chain.length];
+    const card = cardByTarget.get(normalizeName(target));
+    if (!card) throw new Error(`Mission introuvable pour la cible ${target}.`);
+    return card;
+  });
 }
 
 function buildPlayers(names, missionLines) {
@@ -186,6 +191,24 @@ function getEvents(game) {
   return Object.values(game?.events || {}).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
 
+function targetMappingIsSingleCycle(players) {
+  if (players.length < 2) return false;
+  const byName = new Map(players.map((player) => [normalizeName(player.name), player]));
+  const start = players[0];
+  const visited = new Set();
+  let current = start;
+
+  for (let step = 0; step < players.length; step += 1) {
+    const key = normalizeName(current.name);
+    if (visited.has(key)) return false;
+    visited.add(key);
+    current = byName.get(normalizeName(current.target));
+    if (!current) return false;
+  }
+
+  return visited.size === players.length && normalizeName(current.name) === normalizeName(start.name);
+}
+
 function validateSetup(names, missionLines) {
   if (names.length < 2) return "Il faut au moins 2 joueurs.";
   if (new Set(names.map(normalizeName)).size !== names.length) return "Chaque joueur doit avoir un nom unique.";
@@ -194,6 +217,8 @@ function validateSetup(names, missionLines) {
     const cards = buildMissionCards(names, missionLines);
     if (cards.some((card) => !card.mission)) return "Chaque ligne de mission doit contenir une mission.";
     if (new Set(cards.map((card) => normalizeName(card.target))).size !== names.length) return "Chaque joueur doit être ciblé exactement une fois.";
+    const players = buildPlayers(names, missionLines);
+    if (!targetMappingIsSingleCycle(players)) return "Les cibles doivent former une seule chaîne complète.";
   } catch (error) {
     return error.message;
   }
@@ -228,7 +253,9 @@ function runSelfTests() {
     { name: "un joueur est créé par nom", pass: players.length === names.length },
     { name: "chaque joueur a une mission unique", pass: new Set(players.map((p) => p.mission)).size === players.length },
     { name: "chaque joueur est ciblé exactement une fois", pass: new Set(players.map((p) => p.target)).size === players.length && players.every((p) => names.includes(p.target)) },
+    { name: "les cibles forment une seule chaîne complète", pass: targetMappingIsSingleCycle(players) },
     { name: "personne ne se cible soi-même au départ", pass: players.every((p) => normalizeName(p.name) !== normalizeName(p.target)) },
+    { name: "après un kill, l'assassin ne récupère pas sa propre cible", pass: normalizeName(assassin.name) !== normalizeName(assassin.target) },
     { name: "les cibles écrites dans les missions sont conservées", pass: cards.some((card) => card.target === "Francois" && card.mission === "Faire rire Francois") },
     { name: "les codes joueurs sont simples et thématiques", pass: players.every((player) => CHINESE_CODE_WORDS.some((word) => player.code.startsWith(`${word}-`))) },
     { name: "les codes joueurs sont uniques", pass: new Set(players.map((player) => player.code)).size === players.length },
@@ -493,9 +520,9 @@ export default function App() {
   return (
     <main className="min-h-screen bg-zinc-950 p-4 text-zinc-50 sm:p-8"><div className="mx-auto max-w-5xl space-y-6"><header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-5xl font-black tracking-tight sm:text-6xl">Killer</h1><p className="mt-2 max-w-2xl text-zinc-400">Qui sera le roi de la duperie ?</p></div><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">{game ? `${alivePlayers.length}/${players.length} en vie` : "Multi-téléphone"}</Badge></header>{message ? <div className="whitespace-pre-wrap rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-200">{message}</div> : null}
 
-      {mode === "home" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC12" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Une mission peut être liée à une cible avec le format : Cible | Mission.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card></div> : null}
+      {mode === "home" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC12" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Les cibles forment une seule chaîne complète. Une mission peut être liée à une cible avec le format : Cible | Mission.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card></div> : null}
 
-      {mode === "setup" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Les joueurs</h2><p className="mt-2 text-sm text-zinc-400">Un nom par ligne. Minimum 2 joueurs.</p><Field as="textarea" className="mt-4 min-h-60" value={namesText} onChange={(event) => setNamesText(event.target.value)} /></Card><Card><h2 className="text-xl font-bold">Les missions</h2><p className="mt-2 text-sm text-zinc-400">Une ligne par mission. Format conseillé : <span className="font-mono text-zinc-200">Nom cible | Mission</span>. Sans nom cible, la cible est choisie au hasard.</p><Field as="textarea" className="mt-4 min-h-60" value={missionsText} onChange={(event) => setMissionsText(event.target.value)} /></Card><div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row"><Button onClick={createGame}>Créer la partie live</Button><Button variant="outline" onClick={() => setShowTests(!showTests)}>{showTests ? "Cacher les tests" : "Afficher les tests"}</Button><Button variant="ghost" onClick={() => setMode("home")}>Retour</Button></div>{showTests ? <Card className="lg:col-span-2"><h2 className="text-xl font-bold">Tests intégrés</h2><div className="mt-3 grid gap-2">{tests.map((test) => <div key={test.name} className="flex items-center justify-between rounded-xl bg-zinc-950 p-3 text-sm"><span>{test.name}</span><Badge className={test.pass ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{test.pass ? "OK" : "Échec"}</Badge></div>)}</div></Card> : null}</div> : null}
+      {mode === "setup" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Les joueurs</h2><p className="mt-2 text-sm text-zinc-400">Un nom par ligne. Minimum 2 joueurs.</p><Field as="textarea" className="mt-4 min-h-60" value={namesText} onChange={(event) => setNamesText(event.target.value)} /></Card><Card><h2 className="text-xl font-bold">Les missions</h2><p className="mt-2 text-sm text-zinc-400">Une ligne par mission. Format conseillé : <span className="font-mono text-zinc-200">Nom cible | Mission</span>. L’app construit ensuite une chaîne complète de cibles.</p><Field as="textarea" className="mt-4 min-h-60" value={missionsText} onChange={(event) => setMissionsText(event.target.value)} /></Card><div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row"><Button onClick={createGame}>Créer la partie live</Button><Button variant="outline" onClick={() => setShowTests(!showTests)}>{showTests ? "Cacher les tests" : "Afficher les tests"}</Button><Button variant="ghost" onClick={() => setMode("home")}>Retour</Button></div>{showTests ? <Card className="lg:col-span-2"><h2 className="text-xl font-bold">Tests intégrés</h2><div className="mt-3 grid gap-2">{tests.map((test) => <div key={test.name} className="flex items-center justify-between rounded-xl bg-zinc-950 p-3 text-sm"><span>{test.name}</span><Badge className={test.pass ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{test.pass ? "OK" : "Échec"}</Badge></div>)}</div></Card> : null}</div> : null}
 
       {game && mode === "public" ? <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"><Card><h2 className="text-2xl font-black">Connexion joueur</h2><p className="mt-2 text-sm text-zinc-400">Entre ton code joueur pour voir ta fiche, ou ouvre ton lien privé.</p><Field className="mt-4 font-mono uppercase" value={playerCode} onChange={(event) => setPlayerCode(event.target.value.toUpperCase())} placeholder="DRAGON-8" /><Button className="mt-4 w-full" onClick={enterPlayer}>Voir ma fiche</Button><div className="mt-6 border-t border-zinc-800 pt-4"><h3 className="font-bold">Organisateur</h3><Field className="mt-3 font-mono uppercase" value={adminCode} onChange={(event) => setAdminCode(event.target.value.toUpperCase())} placeholder="Code admin" /><Button className="mt-3 w-full" variant="outline" onClick={enterAdmin}>Mode organisateur</Button></div></Card><div className="space-y-4"><TimerPanel /><PublicBoard /></div></div> : null}
 
