@@ -28,6 +28,33 @@ const DEFAULT_MISSIONS = [
   "Alex | Faire demander l’heure à ta cible.",
 ].join("\n");
 
+const CHINESE_CODE_WORDS = [
+  "DRAGON",
+  "LOTUS",
+  "PANDA",
+  "JADE",
+  "TIGER",
+  "BAMBOU",
+  "LANTERNE",
+  "PHENIX",
+  "DYNASTIE",
+  "PAGODE",
+  "MURAILLE",
+  "CERF-VOLANT",
+  "THE",
+  "YIN-YANG",
+  "BOUSSOLE",
+  "CALLIGRAPHIE",
+  "SOIE",
+  "LUNE",
+  "RIZ",
+  "MING",
+  "QIN",
+  "HAN",
+  "KUNG-FU",
+  "MAHJONG",
+];
+
 function Button({ children, variant = "default", className = "", ...props }) {
   const variants = {
     default: "bg-white text-zinc-950 hover:bg-zinc-200",
@@ -35,7 +62,12 @@ function Button({ children, variant = "default", className = "", ...props }) {
     ghost: "text-zinc-300 hover:bg-zinc-900",
     danger: "bg-red-700 text-white hover:bg-red-600",
   };
-  return <button className={`rounded-2xl px-4 py-3 font-bold transition disabled:opacity-50 ${variants[variant]} ${className}`} {...props}>{children}</button>;
+
+  return (
+    <button className={`rounded-2xl px-4 py-3 font-bold transition disabled:opacity-50 ${variants[variant]} ${className}`} {...props}>
+      {children}
+    </button>
+  );
 }
 
 function Card({ children, className = "" }) {
@@ -65,15 +97,29 @@ function randomId(prefix = "id") {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function makeCode(index) {
+function makeGameCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let code = "";
   for (let i = 0; i < 5; i += 1) code += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return `${index + 1}-${code}`;
+  return `DUP-${code}`;
 }
 
-function makeGameCode() {
-  return `DUP-${makeCode(0).replace("1-", "")}`;
+function makeAdminCode() {
+  return `ADMIN-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+function makePlayerCodes(count) {
+  const candidates = [];
+  for (const word of CHINESE_CODE_WORDS) {
+    for (let number = 1; number <= 9; number += 1) {
+      candidates.push(`${word}-${number}`);
+    }
+  }
+
+  const shuffled = shuffle(candidates);
+  if (count <= shuffled.length) return shuffled.slice(0, count);
+
+  return Array.from({ length: count }, (_, index) => `${shuffled[index % shuffled.length]}-${index + 1}`);
 }
 
 function normalizeCode(value) {
@@ -119,9 +165,7 @@ function buildMissionCards(names, missionLines) {
 function assignCardsToPlayers(names, missionCards) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const cards = shuffle(missionCards);
-    if (cards.every((card, index) => normalizeName(card.target) !== normalizeName(names[index]))) {
-      return cards;
-    }
+    if (cards.every((card, index) => normalizeName(card.target) !== normalizeName(names[index]))) return cards;
   }
 
   throw new Error("Impossible d’attribuer les missions sans qu’un joueur se cible lui-même. Essaie de modifier une cible de mission.");
@@ -130,12 +174,14 @@ function assignCardsToPlayers(names, missionCards) {
 function buildPlayers(names, missionLines) {
   const missionCards = buildMissionCards(names, missionLines);
   const assignedCards = assignCardsToPlayers(names, missionCards);
+  const codes = makePlayerCodes(names.length);
+
   return names.map((name, index) => ({
     id: randomId("player"),
     name,
     target: assignedCards[index].target,
     mission: assignedCards[index].mission,
-    code: makeCode(index),
+    code: codes[index],
     alive: true,
     kills: 0,
   }));
@@ -186,6 +232,8 @@ function runSelfTests() {
     { name: "chaque joueur est ciblé exactement une fois", pass: new Set(players.map((p) => p.target)).size === players.length && players.every((p) => names.includes(p.target)) },
     { name: "personne ne se cible soi-même au départ", pass: players.every((p) => normalizeName(p.name) !== normalizeName(p.target)) },
     { name: "les cibles écrites dans les missions sont conservées", pass: cards.some((card) => card.target === "Francois" && card.mission === "Faire rire Francois") },
+    { name: "les codes joueurs sont simples et thématiques", pass: players.every((player) => CHINESE_CODE_WORDS.some((word) => player.code.startsWith(`${word}-`))) },
+    { name: "les codes joueurs sont uniques", pass: new Set(players.map((player) => player.code)).size === players.length },
     { name: "l'assassin récupère la cible et la mission de la victime", pass: assassin.target === victim.target && assassin.mission === victim.mission },
     { name: "la validation bloque missions differentes des joueurs", pass: validateSetup(names, missionLines.slice(0, 3)).includes("autant de missions") },
     { name: "la validation bloque une cible inconnue", pass: validateSetup(names, ["Zoé | Mission", "Clement | Mission", "Francois | Mission", "Alice | Mission"]).includes("Cible inconnue") },
@@ -209,6 +257,7 @@ export default function App() {
   const [gameIdInput, setGameIdInput] = useState("");
   const [adminCode, setAdminCode] = useState("");
   const [playerCode, setPlayerCode] = useState("");
+  const [pendingPrivateCode, setPendingPrivateCode] = useState("");
   const [victimCode, setVictimCode] = useState("");
   const [game, setGame] = useState(null);
   const [currentPlayerId, setCurrentPlayerId] = useState("");
@@ -227,7 +276,13 @@ export default function App() {
   const tests = useMemo(runSelfTests, []);
 
   useEffect(() => {
-    const fromUrl = normalizeCode(new URLSearchParams(window.location.search).get("game"));
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = normalizeCode(params.get("game"));
+    const privateCode = normalizeCode(params.get("player"));
+    if (privateCode) {
+      setPendingPrivateCode(privateCode);
+      setPlayerCode(privateCode);
+    }
     if (fromUrl) joinGame(fromUrl, "public");
   }, []);
 
@@ -240,10 +295,25 @@ export default function App() {
     });
   }, [gameId]);
 
+  useEffect(() => {
+    if (!pendingPrivateCode || !players.length) return;
+    const player = players.find((item) => item.code.toUpperCase() === pendingPrivateCode);
+    if (!player) return;
+    setCurrentPlayerId(player.id);
+    setMode("player");
+    setPendingPrivateCode("");
+    setMessage(`Bienvenue ${player.name}.`);
+  }, [pendingPrivateCode, players]);
+
   function ensureFirebase() {
     if (db) return true;
     setMessage("Firebase n'est pas configuré. Ajoute les variables VITE_FIREBASE_* dans Vercel ou dans ton fichier .env.local.");
     return false;
+  }
+
+  function privateUrl(player) {
+    if (!gameId) return "";
+    return `${window.location.origin}${window.location.pathname}?game=${gameId}&player=${encodeURIComponent(player.code)}`;
   }
 
   async function createGame() {
@@ -254,7 +324,7 @@ export default function App() {
     const error = validateSetup(names, missionLines);
     if (error) return setMessage(error);
     const id = makeGameCode();
-    const newAdminCode = makeCode(99);
+    const newAdminCode = makeAdminCode();
     const now = Date.now();
     const builtPlayers = buildPlayers(names, missionLines);
     const initialEventId = randomId("event");
@@ -353,12 +423,17 @@ export default function App() {
   }
 
   function playerSheet(player) {
-    return `KILLER\nCode partie : ${gameId}\nJoueur : ${player.name}\nCode joueur : ${player.code}\nCible actuelle : ${player.target}\nMission actuelle : ${player.mission}`;
+    return `KILLER\nJoueur : ${player.name}\nLien privé : ${privateUrl(player)}\nCode joueur : ${player.code}\nCible actuelle : ${player.target}\nMission actuelle : ${player.mission}`;
   }
 
   async function copySheet(player) {
     const ok = await copyText(playerSheet(player));
-    setMessage(ok ? `Fiche de ${player.name} copiée.` : playerSheet(player));
+    setMessage(ok ? `Fiche privée de ${player.name} copiée.` : playerSheet(player));
+  }
+
+  async function copyPrivateLink(player) {
+    const ok = await copyText(privateUrl(player));
+    setMessage(ok ? `Lien privé de ${player.name} copié.` : privateUrl(player));
   }
 
   async function copyLink() {
@@ -390,20 +465,20 @@ export default function App() {
     <main className="min-h-screen bg-zinc-950 p-4 text-zinc-50 sm:p-8">
       <div className="mx-auto max-w-5xl space-y-6">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div><div className="text-xs uppercase tracking-[0.35em] text-zinc-400">Soirée Duperie</div><h1 className="mt-2 text-5xl font-black tracking-tight sm:text-6xl">Killer</h1><p className="mt-2 max-w-2xl text-zinc-400">Qui sera le roi de la duperie ?</p></div>
+          <div><h1 className="text-5xl font-black tracking-tight sm:text-6xl">Killer</h1><p className="mt-2 max-w-2xl text-zinc-400">Qui sera le roi de la duperie ?</p></div>
           <Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">{game ? `${alivePlayers.length}/${players.length} en vie` : "Multi-téléphone"}</Badge>
         </header>
         {message ? <div className="whitespace-pre-wrap rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-200">{message}</div> : null}
 
-        {mode === "home" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC123" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Une mission peut être liée à une cible avec le format : Cible | Mission.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card></div> : null}
+        {mode === "home" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC12" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Une mission peut être liée à une cible avec le format : Cible | Mission.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card></div> : null}
 
         {mode === "setup" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Les joueurs</h2><p className="mt-2 text-sm text-zinc-400">Un nom par ligne. Minimum 2 joueurs.</p><Field as="textarea" className="mt-4 min-h-60" value={namesText} onChange={(event) => setNamesText(event.target.value)} /></Card><Card><h2 className="text-xl font-bold">Les missions</h2><p className="mt-2 text-sm text-zinc-400">Une ligne par mission. Format conseillé : <span className="font-mono text-zinc-200">Nom cible | Mission</span>. Sans nom cible, la cible est choisie au hasard.</p><Field as="textarea" className="mt-4 min-h-60" value={missionsText} onChange={(event) => setMissionsText(event.target.value)} /></Card><div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row"><Button onClick={createGame}>Créer la partie live</Button><Button variant="outline" onClick={() => setShowTests(!showTests)}>{showTests ? "Cacher les tests" : "Afficher les tests"}</Button><Button variant="ghost" onClick={() => setMode("home")}>Retour</Button></div>{showTests ? <Card className="lg:col-span-2"><h2 className="text-xl font-bold">Tests intégrés</h2><div className="mt-3 grid gap-2">{tests.map((test) => <div key={test.name} className="flex items-center justify-between rounded-xl bg-zinc-950 p-3 text-sm"><span>{test.name}</span><Badge className={test.pass ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{test.pass ? "OK" : "Échec"}</Badge></div>)}</div></Card> : null}</div> : null}
 
-        {game && mode === "public" ? <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"><Card><h2 className="text-2xl font-black">Connexion joueur</h2><p className="mt-2 text-sm text-zinc-400">Entre ton code joueur pour voir ta fiche.</p><Field className="mt-4 font-mono uppercase" value={playerCode} onChange={(event) => setPlayerCode(event.target.value.toUpperCase())} placeholder="Code joueur" /><Button className="mt-4 w-full" onClick={enterPlayer}>Voir ma fiche</Button><div className="mt-6 border-t border-zinc-800 pt-4"><h3 className="font-bold">Organisateur</h3><Field className="mt-3 font-mono uppercase" value={adminCode} onChange={(event) => setAdminCode(event.target.value.toUpperCase())} placeholder="Code admin" /><Button className="mt-3 w-full" variant="outline" onClick={enterAdmin}>Mode organisateur</Button></div></Card><PublicBoard /></div> : null}
+        {game && mode === "public" ? <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"><Card><h2 className="text-2xl font-black">Connexion joueur</h2><p className="mt-2 text-sm text-zinc-400">Entre ton code joueur pour voir ta fiche, ou ouvre ton lien privé.</p><Field className="mt-4 font-mono uppercase" value={playerCode} onChange={(event) => setPlayerCode(event.target.value.toUpperCase())} placeholder="DRAGON-8" /><Button className="mt-4 w-full" onClick={enterPlayer}>Voir ma fiche</Button><div className="mt-6 border-t border-zinc-800 pt-4"><h3 className="font-bold">Organisateur</h3><Field className="mt-3 font-mono uppercase" value={adminCode} onChange={(event) => setAdminCode(event.target.value.toUpperCase())} placeholder="Code admin" /><Button className="mt-3 w-full" variant="outline" onClick={enterAdmin}>Mode organisateur</Button></div></Card><PublicBoard /></div> : null}
 
         {game && mode === "player" && currentPlayer ? <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]"><Card><h2 className="text-2xl font-black">Ta fiche secrète</h2><div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5"><div className="flex items-start justify-between gap-4"><div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Joueur</div><div className="text-3xl font-black">{currentPlayer.name}</div></div><Badge className={currentPlayer.alive ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{currentPlayer.alive ? "En vie" : "Killé"}</Badge></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta cible actuelle</div><div className="mt-1 text-xl font-bold">{currentPlayer.alive ? currentPlayer.target : "—"}</div></div><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ton code secret</div><div className="mt-1 font-mono text-xl font-bold">{currentPlayer.code}</div></div></div><div className="mt-3 rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta mission actuelle</div><p className="mt-2 text-lg leading-relaxed">{currentPlayer.alive ? currentPlayer.mission : "Tu es éliminé. Donne ton code à ton assassin."}</p></div></div></Card><div className="space-y-4"><Card><h2 className="text-2xl font-black">Déclarer un kill</h2><p className="mt-2 text-sm text-zinc-400">Entre le code donné par ta victime. Tu récupéreras sa cible et sa mission.</p><Field className="mt-4 font-mono uppercase" value={victimCode} onChange={(event) => setVictimCode(event.target.value.toUpperCase())} placeholder="Code de la victime" /><Button className="mt-4 w-full" onClick={submitKill}>Valider le kill</Button><Button className="mt-2 w-full" variant="ghost" onClick={() => setMode("public")}>Retour écran public</Button></Card><PublicBoard /></div></div> : null}
 
-        {game && mode === "admin" && isAdmin ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-2xl font-black">Organisateur</h2><div className="mt-4 rounded-xl bg-zinc-950 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Code partie</div><div className="mt-1 font-mono text-3xl font-black">{gameId}</div></div><div className="mt-3 rounded-xl bg-zinc-950 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Lien public</div><div className="mt-1 break-all text-sm text-zinc-300">{publicUrl}</div></div><div className="mt-4 flex flex-col gap-3 sm:flex-row"><Button onClick={copyLink}>Copier le lien</Button><Button variant="outline" onClick={() => setShowCards(!showCards)}>{showCards ? "Cacher les fiches" : "Voir les fiches"}</Button></div><Button className="mt-3 w-full" variant="danger" onClick={deleteGame}>Supprimer la partie</Button></Card><PublicBoard />{showCards ? <Card className="lg:col-span-2"><h2 className="text-2xl font-black">Fiches joueurs</h2><div className="mt-4 grid gap-3 md:grid-cols-2">{players.map((player) => <div key={player.id} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-xl font-black">{player.name}</div><div className="text-sm text-zinc-500">Code : <span className="font-mono">{player.code}</span></div></div><Badge className={player.alive ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{player.alive ? "En vie" : "Killé"}</Badge></div><div className="mt-3 text-sm text-zinc-300">Cible actuelle : <strong>{player.target}</strong></div><div className="mt-1 text-sm text-zinc-300">Mission actuelle : {player.mission}</div><Button className="mt-3" variant="outline" onClick={() => copySheet(player)}>Copier sa fiche</Button></div>)}</div></Card> : null}</div> : null}
+        {game && mode === "admin" && isAdmin ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-2xl font-black">Organisateur</h2><div className="mt-4 rounded-xl bg-zinc-950 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Code partie</div><div className="mt-1 font-mono text-3xl font-black">{gameId}</div></div><div className="mt-3 rounded-xl bg-zinc-950 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Lien public</div><div className="mt-1 break-all text-sm text-zinc-300">{publicUrl}</div></div><div className="mt-4 flex flex-col gap-3 sm:flex-row"><Button onClick={copyLink}>Copier le lien public</Button><Button variant="outline" onClick={() => setShowCards(!showCards)}>{showCards ? "Cacher les fiches" : "Voir les fiches"}</Button></div><Button className="mt-3 w-full" variant="danger" onClick={deleteGame}>Supprimer la partie</Button></Card><PublicBoard />{showCards ? <Card className="lg:col-span-2"><h2 className="text-2xl font-black">Fiches joueurs</h2><div className="mt-4 grid gap-3 md:grid-cols-2">{players.map((player) => <div key={player.id} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-xl font-black">{player.name}</div><div className="text-sm text-zinc-500">Code : <span className="font-mono">{player.code}</span></div></div><Badge className={player.alive ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{player.alive ? "En vie" : "Killé"}</Badge></div><div className="mt-3 text-sm text-zinc-300">Lien privé : <span className="break-all text-zinc-400">{privateUrl(player)}</span></div><div className="mt-3 text-sm text-zinc-300">Cible actuelle : <strong>{player.target}</strong></div><div className="mt-1 text-sm text-zinc-300">Mission actuelle : {player.mission}</div><div className="mt-3 flex flex-col gap-2 sm:flex-row"><Button variant="outline" onClick={() => copyPrivateLink(player)}>Copier lien privé</Button><Button variant="outline" onClick={() => copySheet(player)}>Copier fiche</Button></div></div>)}</div></Card> : null}</div> : null}
       </div>
     </main>
   );
