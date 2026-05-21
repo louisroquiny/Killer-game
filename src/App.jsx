@@ -16,16 +16,24 @@ const isFirebaseConfigured = Object.values(firebaseConfig).every(Boolean);
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 const db = app ? getDatabase(app) : null;
 
-const DEFAULT_NAMES = ["Alex", "Camille", "Sam", "Charlie", "Lou", "Noa", "Max", "Sasha"].join("\n");
+const DEFAULT_NAMES = [
+  "Robin",
+  "François",
+  "François-Xavier",
+  "Clément",
+  "Julien",
+  "Guillaume",
+  "Sébastien",
+].join("\n");
+
 const DEFAULT_MISSIONS = [
-  "Camille | Faire dire à ta cible : ‘Je te jure que c’est vrai.’",
-  "Sam | Faire trinquer ta cible avec toi.",
-  "Charlie | Faire signer ou dessiner quelque chose à ta cible.",
-  "Lou | Faire prononcer le mot ‘duperie’ à ta cible.",
-  "Noa | Obtenir un selfie avec ta cible.",
-  "Max | Faire porter un accessoire à ta cible pendant 30 secondes.",
-  "Sasha | Faire rire ta cible avec une histoire inventée.",
-  "Alex | Faire demander l’heure à ta cible.",
+  "Sébastien | Faire manger du piment à ta cible",
+  "François-Xavier | Faire croire à ta cible que tu",
+  "Clément | Faire signer ou dessiner quelque chose à ta cible.",
+  "François | Faire prononcer le mot ‘duperie’ à ta cible.",
+  "Julien | Obtenir un selfie avec ta cible.",
+  "Guillaume | Faire porter un accessoire à ta cible pendant 30 secondes.",
+  "Robin | Faire rire ta cible avec une histoire inventée.",
 ].join("\n");
 
 const CHINESE_CODE_WORDS = [
@@ -243,14 +251,20 @@ function formatTime(totalSeconds) {
 function runSelfTests() {
   const names = ["Robin", "Clement", "Francois", "Alice"];
   const missionLines = ["Clement | Faire trinquer Clement", "Francois | Faire rire Francois", "Alice | Obtenir un selfie avec Alice", "Robin | Faire dire duperie a Robin"];
+  const defaultNames = parseLines(DEFAULT_NAMES);
+  const defaultMissions = parseLines(DEFAULT_MISSIONS);
   const players = buildPlayers(names, missionLines);
+  const defaultPlayers = buildPlayers(defaultNames, defaultMissions);
   const cards = buildMissionCards(names, missionLines);
   const assassin = { ...players[0] };
   const victim = { ...players.find((player) => player.name === assassin.target) };
   assassin.target = victim.target;
   assassin.mission = victim.mission;
+  const finalTimer = { durationSeconds: 1800, remainingSeconds: 424, running: false, startedAt: null };
   return [
     { name: "un joueur est créé par nom", pass: players.length === names.length },
+    { name: "les valeurs par défaut sont valides", pass: validateSetup(defaultNames, defaultMissions) === "" },
+    { name: "les valeurs par défaut créent une chaîne complète", pass: targetMappingIsSingleCycle(defaultPlayers) },
     { name: "chaque joueur a une mission unique", pass: new Set(players.map((p) => p.mission)).size === players.length },
     { name: "chaque joueur est ciblé exactement une fois", pass: new Set(players.map((p) => p.target)).size === players.length && players.every((p) => names.includes(p.target)) },
     { name: "les cibles forment une seule chaîne complète", pass: targetMappingIsSingleCycle(players) },
@@ -264,6 +278,7 @@ function runSelfTests() {
     { name: "la validation bloque une cible inconnue", pass: validateSetup(names, ["Zoé | Mission", "Clement | Mission", "Francois | Mission", "Alice | Mission"]).includes("Cible inconnue") },
     { name: "le chrono calcule le temps restant", pass: getTimerRemaining({ running: true, remainingSeconds: 60, startedAt: 1000 }, 31000) === 30 },
     { name: "le chrono ne devient pas négatif", pass: getTimerRemaining({ running: true, remainingSeconds: 10, startedAt: 1000 }, 30000) === 0 },
+    { name: "le chrono final est bien stoppé", pass: finalTimer.running === false && finalTimer.startedAt === null },
   ];
 }
 
@@ -452,9 +467,13 @@ export default function App() {
     await update(ref(db, `games/${gameId}/players/${victim.id}`), { alive: false, updatedAt: now });
     await update(ref(db, `games/${gameId}/players/${currentPlayer.id}`), { kills: (currentPlayer.kills || 0) + 1, target: victim.target, mission: victim.mission, updatedAt: now });
     await set(ref(db, `games/${gameId}/events/${eventId}`), { id: eventId, text: `Une personne a été killée. Il reste ${remainingAfterKill} survivant(s).`, at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), createdAt: now });
-    await update(ref(db, `games/${gameId}`), { status: remainingAfterKill === 1 ? "finished" : "active", updatedAt: now });
+    const gameUpdate = { status: remainingAfterKill === 1 ? "finished" : "active", updatedAt: now };
+    if (remainingAfterKill === 1) {
+      gameUpdate.timer = { ...timer, remainingSeconds, running: false, startedAt: null };
+    }
+    await update(ref(db, `games/${gameId}`), gameUpdate);
     setVictimCode("");
-    setMessage("Kill validé. Tu récupères la cible et la mission de la victime.");
+    setMessage(remainingAfterKill === 1 ? "Kill validé. Le chrono est arrêté. On a un vainqueur !" : "Kill validé. Tu récupères la cible et la mission de la victime.");
   }
 
   async function deleteGame() {
@@ -496,11 +515,11 @@ export default function App() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-black">Chrono</h2>
-            <p className="text-sm text-zinc-400">{timer.running ? "En cours" : remainingSeconds === 0 ? "Terminé" : "En pause"}</p>
+            <p className="text-sm text-zinc-400">{winner ? "Arrêté — victoire" : timer.running ? "En cours" : remainingSeconds === 0 ? "Terminé" : "En pause"}</p>
           </div>
           <Badge className={timer.running ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-zinc-700 bg-zinc-800 text-zinc-100"}>{timer.running ? "ON" : "OFF"}</Badge>
         </div>
-        <div className={remainingSeconds === 0 ? "mt-4 rounded-2xl border border-red-700 bg-red-950/40 p-5 text-center font-mono text-6xl font-black text-red-100" : "mt-4 rounded-2xl bg-zinc-950 p-5 text-center font-mono text-6xl font-black"}>{formatTime(remainingSeconds)}</div>
+        <div className={remainingSeconds === 0 || winner ? "mt-4 rounded-2xl border border-yellow-700 bg-yellow-950/40 p-5 text-center font-mono text-6xl font-black text-yellow-100" : "mt-4 rounded-2xl bg-zinc-950 p-5 text-center font-mono text-6xl font-black"}>{formatTime(remainingSeconds)}</div>
         {admin ? <div className="mt-4 space-y-3"><label className="block text-sm text-zinc-400">Durée en minutes</label><Field type="number" min="1" value={timerMinutes} onChange={(event) => setTimerMinutes(event.target.value)} /><div className="grid gap-2 sm:grid-cols-3"><Button onClick={startTimer}>Lancer</Button><Button variant="outline" onClick={stopTimer}>Stopper</Button><Button variant="ghost" onClick={resetTimer}>Réinitialiser</Button></div></div> : null}
       </Card>
     );
@@ -510,9 +529,7 @@ export default function App() {
     return (
       <Card>
         <div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-black">Écran public</h2><p className="text-sm text-zinc-400">Code partie : <span className="font-mono text-zinc-200">{gameId || "—"}</span></p></div><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">Live</Badge></div>
-        <div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{alivePlayers.length}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">survivants</div></div><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{deadCount}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">kills</div></div></div>
-        {winner ? <div className="mt-4 rounded-2xl border border-yellow-700 bg-yellow-950/40 p-4 text-yellow-100"><div className="text-xl font-black">Dernier survivant</div><div className="mt-2 text-3xl font-black">{winner.name}</div></div> : null}
-        {!winner ? <div className="mt-4 space-y-2">{events.length === 0 ? <p className="text-sm text-zinc-500">Aucun événement pour l’instant.</p> : null}{events.map((event) => <div key={event.id} className="rounded-xl bg-zinc-950 p-3 text-sm"><span className="text-zinc-500">{event.at}</span> — {event.text}</div>)}</div> : null}
+        {winner ? <div className="mt-5 rounded-3xl border border-yellow-600 bg-yellow-950/50 p-6 text-center text-yellow-100"><div className="text-5xl">👑</div><div className="mt-3 text-sm uppercase tracking-[0.35em] text-yellow-300/80">Vainqueur</div><div className="mt-2 text-5xl font-black">{winner.name}</div><p className="mt-3 text-sm text-yellow-100/80">Le chrono est arrêté. La duperie a son roi.</p></div> : <><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{alivePlayers.length}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">survivants</div></div><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{deadCount}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">kills</div></div></div><div className="mt-4 space-y-2">{events.length === 0 ? <p className="text-sm text-zinc-500">Aucun événement pour l’instant.</p> : null}{events.map((event) => <div key={event.id} className="rounded-xl bg-zinc-950 p-3 text-sm"><span className="text-zinc-500">{event.at}</span> — {event.text}</div>)}</div></>}
       </Card>
     );
   }
