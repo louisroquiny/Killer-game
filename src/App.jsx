@@ -18,14 +18,14 @@ const db = app ? getDatabase(app) : null;
 
 const DEFAULT_NAMES = ["Alex", "Camille", "Sam", "Charlie", "Lou", "Noa", "Max", "Sasha"].join("\n");
 const DEFAULT_MISSIONS = [
-  "Faire dire à ta cible : ‘Je te jure que c’est vrai.’",
-  "Faire trinquer ta cible avec toi.",
-  "Faire signer ou dessiner quelque chose à ta cible.",
-  "Faire prononcer le mot ‘duperie’ à ta cible.",
-  "Obtenir un selfie avec ta cible.",
-  "Faire porter un accessoire à ta cible pendant 30 secondes.",
-  "Faire rire ta cible avec une histoire inventée.",
-  "Faire demander l’heure à ta cible.",
+  "Camille | Faire dire à ta cible : ‘Je te jure que c’est vrai.’",
+  "Sam | Faire trinquer ta cible avec toi.",
+  "Charlie | Faire signer ou dessiner quelque chose à ta cible.",
+  "Lou | Faire prononcer le mot ‘duperie’ à ta cible.",
+  "Noa | Obtenir un selfie avec ta cible.",
+  "Max | Faire porter un accessoire à ta cible pendant 30 secondes.",
+  "Sasha | Faire rire ta cible avec une histoire inventée.",
+  "Alex | Faire demander l’heure à ta cible.",
 ].join("\n");
 
 function Button({ children, variant = "default", className = "", ...props }) {
@@ -80,25 +80,61 @@ function normalizeCode(value) {
   return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
 }
 
+function normalizeName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function parseLines(text) {
   return text.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
-function buildTargetLoop(names) {
-  const circle = shuffle(names);
-  const targetByName = new Map();
-  circle.forEach((name, index) => targetByName.set(name, circle[(index + 1) % circle.length]));
-  return names.map((name) => targetByName.get(name));
+function parseMissionLine(line) {
+  const separator = line.indexOf("|");
+  if (separator === -1) return { target: "", mission: line.trim() };
+  return {
+    target: line.slice(0, separator).trim(),
+    mission: line.slice(separator + 1).trim(),
+  };
 }
 
-function buildPlayers(names, missions) {
-  const targets = buildTargetLoop(names);
-  const randomizedMissions = shuffle(missions);
+function buildMissionCards(names, missionLines) {
+  const parsed = missionLines.map(parseMissionLine);
+  const nameByKey = new Map(names.map((name) => [normalizeName(name), name]));
+  const explicitTargets = new Set();
+
+  const cards = parsed.map((item) => {
+    if (!item.target) return { target: "", mission: item.mission };
+    const target = nameByKey.get(normalizeName(item.target));
+    if (!target) throw new Error(`Cible inconnue : ${item.target}`);
+    const key = normalizeName(target);
+    if (explicitTargets.has(key)) throw new Error(`La cible ${target} est attribuée à plusieurs missions.`);
+    explicitTargets.add(key);
+    return { target, mission: item.mission };
+  });
+
+  const remainingTargets = shuffle(names.filter((name) => !explicitTargets.has(normalizeName(name))));
+  return cards.map((card) => (card.target ? card : { ...card, target: remainingTargets.shift() }));
+}
+
+function assignCardsToPlayers(names, missionCards) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const cards = shuffle(missionCards);
+    if (cards.every((card, index) => normalizeName(card.target) !== normalizeName(names[index]))) {
+      return cards;
+    }
+  }
+
+  throw new Error("Impossible d’attribuer les missions sans qu’un joueur se cible lui-même. Essaie de modifier une cible de mission.");
+}
+
+function buildPlayers(names, missionLines) {
+  const missionCards = buildMissionCards(names, missionLines);
+  const assignedCards = assignCardsToPlayers(names, missionCards);
   return names.map((name, index) => ({
     id: randomId("player"),
     name,
-    target: targets[index],
-    mission: randomizedMissions[index],
+    target: assignedCards[index].target,
+    mission: assignedCards[index].mission,
     code: makeCode(index),
     alive: true,
     kills: 0,
@@ -113,28 +149,46 @@ function getEvents(game) {
   return Object.values(game?.events || {}).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 }
 
-function validateSetup(names, missions) {
+function validateSetup(names, missionLines) {
   if (names.length < 2) return "Il faut au moins 2 joueurs.";
-  if (new Set(names.map((name) => name.toLowerCase())).size !== names.length) return "Chaque joueur doit avoir un nom unique.";
-  if (missions.length !== names.length) return `Il faut exactement autant de missions que de joueurs : ${names.length} joueur(s), ${missions.length} mission(s).`;
+  if (new Set(names.map(normalizeName)).size !== names.length) return "Chaque joueur doit avoir un nom unique.";
+  if (missionLines.length !== names.length) return `Il faut exactement autant de missions que de joueurs : ${names.length} joueur(s), ${missionLines.length} mission(s).`;
+
+  try {
+    const cards = buildMissionCards(names, missionLines);
+    if (cards.some((card) => !card.mission)) return "Chaque ligne de mission doit contenir une mission.";
+    if (new Set(cards.map((card) => normalizeName(card.target))).size !== names.length) return "Chaque joueur doit être ciblé exactement une fois.";
+  } catch (error) {
+    return error.message;
+  }
+
   return "";
 }
 
 function runSelfTests() {
   const names = ["Robin", "Clement", "Francois", "Alice"];
-  const missions = ["Mission A", "Mission B", "Mission C", "Mission D"];
-  const players = buildPlayers(names, missions);
+  const missionLines = [
+    "Clement | Faire trinquer Clement",
+    "Francois | Faire rire Francois",
+    "Alice | Obtenir un selfie avec Alice",
+    "Robin | Faire dire duperie a Robin",
+  ];
+  const players = buildPlayers(names, missionLines);
+  const cards = buildMissionCards(names, missionLines);
   const assassin = { ...players[0] };
   const victim = { ...players.find((player) => player.name === assassin.target) };
   assassin.target = victim.target;
   assassin.mission = victim.mission;
+
   return [
     { name: "un joueur est créé par nom", pass: players.length === names.length },
     { name: "chaque joueur a une mission unique", pass: new Set(players.map((p) => p.mission)).size === players.length },
     { name: "chaque joueur est ciblé exactement une fois", pass: new Set(players.map((p) => p.target)).size === players.length && players.every((p) => names.includes(p.target)) },
-    { name: "personne ne se cible soi-même", pass: players.every((p) => p.name !== p.target) },
+    { name: "personne ne se cible soi-même au départ", pass: players.every((p) => normalizeName(p.name) !== normalizeName(p.target)) },
+    { name: "les cibles écrites dans les missions sont conservées", pass: cards.some((card) => card.target === "Francois" && card.mission === "Faire rire Francois") },
     { name: "l'assassin récupère la cible et la mission de la victime", pass: assassin.target === victim.target && assassin.mission === victim.mission },
-    { name: "la validation bloque missions differentes des joueurs", pass: validateSetup(names, missions.slice(0, 3)).includes("autant de missions") },
+    { name: "la validation bloque missions differentes des joueurs", pass: validateSetup(names, missionLines.slice(0, 3)).includes("autant de missions") },
+    { name: "la validation bloque une cible inconnue", pass: validateSetup(names, ["Zoé | Mission", "Clement | Mission", "Francois | Mission", "Alice | Mission"]).includes("Cible inconnue") },
   ];
 }
 
@@ -196,13 +250,13 @@ export default function App() {
     if (!ensureFirebase()) return;
     setMessage("");
     const names = parseLines(namesText);
-    const missions = parseLines(missionsText);
-    const error = validateSetup(names, missions);
+    const missionLines = parseLines(missionsText);
+    const error = validateSetup(names, missionLines);
     if (error) return setMessage(error);
     const id = makeGameCode();
     const newAdminCode = makeCode(99);
     const now = Date.now();
-    const builtPlayers = buildPlayers(names, missions);
+    const builtPlayers = buildPlayers(names, missionLines);
     const initialEventId = randomId("event");
     await set(ref(db, `games/${id}`), {
       id,
@@ -341,9 +395,9 @@ export default function App() {
         </header>
         {message ? <div className="whitespace-pre-wrap rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-200">{message}</div> : null}
 
-        {mode === "home" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC123" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Il faut exactement autant de missions que de joueurs.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card></div> : null}
+        {mode === "home" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC123" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Une mission peut être liée à une cible avec le format : Cible | Mission.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card></div> : null}
 
-        {mode === "setup" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Les joueurs</h2><p className="mt-2 text-sm text-zinc-400">Un nom par ligne. Minimum 2 joueurs.</p><Field as="textarea" className="mt-4 min-h-60" value={namesText} onChange={(event) => setNamesText(event.target.value)} /></Card><Card><h2 className="text-xl font-bold">Les missions</h2><p className="mt-2 text-sm text-zinc-400">Une mission par ligne. Le nombre doit être identique au nombre de joueurs.</p><Field as="textarea" className="mt-4 min-h-60" value={missionsText} onChange={(event) => setMissionsText(event.target.value)} /></Card><div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row"><Button onClick={createGame}>Créer la partie live</Button><Button variant="outline" onClick={() => setShowTests(!showTests)}>{showTests ? "Cacher les tests" : "Afficher les tests"}</Button><Button variant="ghost" onClick={() => setMode("home")}>Retour</Button></div>{showTests ? <Card className="lg:col-span-2"><h2 className="text-xl font-bold">Tests intégrés</h2><div className="mt-3 grid gap-2">{tests.map((test) => <div key={test.name} className="flex items-center justify-between rounded-xl bg-zinc-950 p-3 text-sm"><span>{test.name}</span><Badge className={test.pass ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{test.pass ? "OK" : "Échec"}</Badge></div>)}</div></Card> : null}</div> : null}
+        {mode === "setup" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Les joueurs</h2><p className="mt-2 text-sm text-zinc-400">Un nom par ligne. Minimum 2 joueurs.</p><Field as="textarea" className="mt-4 min-h-60" value={namesText} onChange={(event) => setNamesText(event.target.value)} /></Card><Card><h2 className="text-xl font-bold">Les missions</h2><p className="mt-2 text-sm text-zinc-400">Une ligne par mission. Format conseillé : <span className="font-mono text-zinc-200">Nom cible | Mission</span>. Sans nom cible, la cible est choisie au hasard.</p><Field as="textarea" className="mt-4 min-h-60" value={missionsText} onChange={(event) => setMissionsText(event.target.value)} /></Card><div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row"><Button onClick={createGame}>Créer la partie live</Button><Button variant="outline" onClick={() => setShowTests(!showTests)}>{showTests ? "Cacher les tests" : "Afficher les tests"}</Button><Button variant="ghost" onClick={() => setMode("home")}>Retour</Button></div>{showTests ? <Card className="lg:col-span-2"><h2 className="text-xl font-bold">Tests intégrés</h2><div className="mt-3 grid gap-2">{tests.map((test) => <div key={test.name} className="flex items-center justify-between rounded-xl bg-zinc-950 p-3 text-sm"><span>{test.name}</span><Badge className={test.pass ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{test.pass ? "OK" : "Échec"}</Badge></div>)}</div></Card> : null}</div> : null}
 
         {game && mode === "public" ? <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"><Card><h2 className="text-2xl font-black">Connexion joueur</h2><p className="mt-2 text-sm text-zinc-400">Entre ton code joueur pour voir ta fiche.</p><Field className="mt-4 font-mono uppercase" value={playerCode} onChange={(event) => setPlayerCode(event.target.value.toUpperCase())} placeholder="Code joueur" /><Button className="mt-4 w-full" onClick={enterPlayer}>Voir ma fiche</Button><div className="mt-6 border-t border-zinc-800 pt-4"><h3 className="font-bold">Organisateur</h3><Field className="mt-3 font-mono uppercase" value={adminCode} onChange={(event) => setAdminCode(event.target.value.toUpperCase())} placeholder="Code admin" /><Button className="mt-3 w-full" variant="outline" onClick={enterAdmin}>Mode organisateur</Button></div></Card><PublicBoard /></div> : null}
 
