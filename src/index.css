@@ -1,1 +1,5 @@
 @import "tailwindcss";
+
+header > div:last-child:not(:has(button)) > span {
+  display: none;
+}
