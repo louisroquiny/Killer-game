@@ -12,6 +12,8 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
+const GENERAL_ADMIN_USER = "admin";
+const GENERAL_ADMIN_PASSWORD = import.meta.env.VITE_GENERAL_ADMIN_PASSWORD || "";
 const isFirebaseConfigured = Object.values(firebaseConfig).every(Boolean);
 const app = isFirebaseConfigured ? initializeApp(firebaseConfig) : null;
 const db = app ? getDatabase(app) : null;
@@ -31,189 +33,32 @@ const CHINESE_CODE_WORDS = ["DRAGON", "LOTUS", "PANDA", "JADE", "TIGER", "BAMBOU
 const DEFAULT_TIMER_SECONDS = 30 * 60;
 
 function Button({ children, variant = "default", className = "", ...props }) {
-  const variants = {
-    default: "bg-white text-zinc-950 hover:bg-zinc-200",
-    outline: "border border-zinc-700 bg-zinc-950 text-white hover:bg-zinc-900",
-    ghost: "text-zinc-300 hover:bg-zinc-900",
-    danger: "bg-red-700 text-white hover:bg-red-600",
-    success: "bg-emerald-700 text-white hover:bg-emerald-600",
-  };
+  const variants = { default: "bg-white text-zinc-950 hover:bg-zinc-200", outline: "border border-zinc-700 bg-zinc-950 text-white hover:bg-zinc-900", ghost: "text-zinc-300 hover:bg-zinc-900", danger: "bg-red-700 text-white hover:bg-red-600", success: "bg-emerald-700 text-white hover:bg-emerald-600" };
   return <button className={`rounded-2xl px-4 py-3 font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className}`} {...props}>{children}</button>;
 }
-
-function Card({ children, className = "" }) {
-  return <section className={`rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-xl ${className}`}>{children}</section>;
-}
-
-function Field({ as = "input", className = "", ...props }) {
-  const Component = as;
-  return <Component className={`w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-3 text-white outline-none ${className}`} {...props} />;
-}
-
-function Badge({ children, className = "" }) {
-  return <span className={`inline-flex w-fit rounded-full border px-3 py-1 text-sm font-bold ${className}`}>{children}</span>;
-}
-
-function shuffle(items) {
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-function randomId(prefix = "id") {
-  if (globalThis.crypto?.randomUUID) return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function makeGameCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 5; i += 1) code += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return `DUP-${code}`;
-}
-
-function makeAdminCode() {
-  return `ADMIN-${Math.floor(1000 + Math.random() * 9000)}`;
-}
-
-function makePlayerCodes(count) {
-  const candidates = [];
-  for (const word of CHINESE_CODE_WORDS) {
-    for (let n = 1; n <= 9; n += 1) candidates.push(`${word}-${n}`);
-  }
-  const shuffled = shuffle(candidates);
-  if (count <= shuffled.length) return shuffled.slice(0, count);
-  return Array.from({ length: count }, (_, i) => `${shuffled[i % shuffled.length]}-${i + 1}`);
-}
-
-function normalizeCode(value) {
-  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
-}
-
-function normalizeName(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function parseLines(text) {
-  return text.split("\n").map((line) => line.trim()).filter(Boolean);
-}
-
-function parseMissionLine(line) {
-  const separator = line.indexOf("|");
-  if (separator === -1) return { target: "", mission: line.trim() };
-  return { target: line.slice(0, separator).trim(), mission: line.slice(separator + 1).trim() };
-}
-
-function buildMissionCards(names, missionLines) {
-  const nameByKey = new Map(names.map((name) => [normalizeName(name), name]));
-  const explicitTargets = new Set();
-  const cards = missionLines.map((line) => {
-    const item = parseMissionLine(line);
-    if (!item.target) return { target: "", mission: item.mission };
-    const target = nameByKey.get(normalizeName(item.target));
-    if (!target) throw new Error(`Cible inconnue : ${item.target}`);
-    const key = normalizeName(target);
-    if (explicitTargets.has(key)) throw new Error(`La cible ${target} est attribuée à plusieurs missions.`);
-    explicitTargets.add(key);
-    return { target, mission: item.mission };
-  });
-  const remainingTargets = shuffle(names.filter((name) => !explicitTargets.has(normalizeName(name))));
-  return cards.map((card) => (card.target ? card : { ...card, target: remainingTargets.shift() }));
-}
-
-function assignCardsToPlayers(names, missionCards) {
-  const cardByTarget = new Map(missionCards.map((card) => [normalizeName(card.target), card]));
-  const chain = shuffle(names);
-  return names.map((name) => {
-    const chainIndex = chain.findIndex((item) => normalizeName(item) === normalizeName(name));
-    const target = chain[(chainIndex + 1) % chain.length];
-    const card = cardByTarget.get(normalizeName(target));
-    if (!card) throw new Error(`Mission introuvable pour la cible ${target}.`);
-    return card;
-  });
-}
-
-function buildPlayers(names, missionLines) {
-  const missionCards = buildMissionCards(names, missionLines);
-  const assignedCards = assignCardsToPlayers(names, missionCards);
-  const codes = makePlayerCodes(names.length);
-  return names.map((name, index) => ({
-    id: randomId("player"),
-    name,
-    target: assignedCards[index].target,
-    mission: assignedCards[index].mission,
-    code: codes[index],
-    alive: true,
-    kills: 0,
-  }));
-}
-
-function targetMappingIsSingleCycle(players) {
-  if (players.length < 2) return false;
-  const byName = new Map(players.map((player) => [normalizeName(player.name), player]));
-  const start = players[0];
-  const visited = new Set();
-  let current = start;
-  for (let step = 0; step < players.length; step += 1) {
-    const key = normalizeName(current.name);
-    if (visited.has(key)) return false;
-    visited.add(key);
-    current = byName.get(normalizeName(current.target));
-    if (!current) return false;
-  }
-  return visited.size === players.length && normalizeName(current.name) === normalizeName(start.name);
-}
-
-function validateSetup(names, missionLines) {
-  if (names.length < 2) return "Il faut au moins 2 joueurs.";
-  if (new Set(names.map(normalizeName)).size !== names.length) return "Chaque joueur doit avoir un nom unique.";
-  if (missionLines.length !== names.length) return `Il faut exactement autant de missions que de joueurs : ${names.length} joueur(s), ${missionLines.length} mission(s).`;
-  try {
-    const cards = buildMissionCards(names, missionLines);
-    if (cards.some((card) => !card.mission)) return "Chaque ligne de mission doit contenir une mission.";
-    if (new Set(cards.map((card) => normalizeName(card.target))).size !== names.length) return "Chaque joueur doit être ciblé exactement une fois.";
-    if (!targetMappingIsSingleCycle(buildPlayers(names, missionLines))) return "Les cibles doivent former une seule chaîne complète.";
-  } catch (error) {
-    return error.message;
-  }
-  return "";
-}
-
-function getPlayers(game) {
-  return Object.values(game?.players || {});
-}
-
-function getEvents(game) {
-  return Object.values(game?.events || {}).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-}
-
-function getPendingKills(game) {
-  return Object.values(game?.pendingKills || {}).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-}
-
-function getTimerRemaining(timer, now = Date.now()) {
-  if (!timer) return DEFAULT_TIMER_SECONDS;
-  const base = Number(timer.remainingSeconds ?? timer.durationSeconds ?? DEFAULT_TIMER_SECONDS);
-  if (!timer.running || !timer.startedAt) return Math.max(0, base);
-  return Math.max(0, base - Math.floor((now - Number(timer.startedAt)) / 1000));
-}
-
-function formatTime(totalSeconds) {
-  const seconds = Math.max(0, Number(totalSeconds) || 0);
-  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
+function Card({ children, className = "" }) { return <section className={`rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-xl ${className}`}>{children}</section>; }
+function Field({ as = "input", className = "", ...props }) { const Component = as; return <Component className={`w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-3 text-white outline-none ${className}`} {...props} />; }
+function Badge({ children, className = "" }) { return <span className={`inline-flex w-fit rounded-full border px-3 py-1 text-sm font-bold ${className}`}>{children}</span>; }
+function shuffle(items) { const copy = [...items]; for (let i = copy.length - 1; i > 0; i -= 1) { const j = Math.floor(Math.random() * (i + 1)); [copy[i], copy[j]] = [copy[j], copy[i]]; } return copy; }
+function randomId(prefix = "id") { if (globalThis.crypto?.randomUUID) return `${prefix}-${crypto.randomUUID().slice(0, 8)}`; return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
+function makeGameCode() { const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let code = ""; for (let i = 0; i < 5; i += 1) code += alphabet[Math.floor(Math.random() * alphabet.length)]; return `DUP-${code}`; }
+function makeAdminCode() { return `ADMIN-${Math.floor(1000 + Math.random() * 9000)}`; }
+function makePlayerCodes(count) { const candidates = []; for (const word of CHINESE_CODE_WORDS) for (let n = 1; n <= 9; n += 1) candidates.push(`${word}-${n}`); const shuffled = shuffle(candidates); if (count <= shuffled.length) return shuffled.slice(0, count); return Array.from({ length: count }, (_, i) => `${shuffled[i % shuffled.length]}-${i + 1}`); }
+function normalizeCode(value) { return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9-]/g, ""); }
+function normalizeName(value) { return String(value || "").trim().toLowerCase(); }
+function parseLines(text) { return text.split("\n").map((line) => line.trim()).filter(Boolean); }
+function parseMissionLine(line) { const separator = line.indexOf("|"); if (separator === -1) return { target: "", mission: line.trim() }; return { target: line.slice(0, separator).trim(), mission: line.slice(separator + 1).trim() }; }
+function buildMissionCards(names, missionLines) { const nameByKey = new Map(names.map((name) => [normalizeName(name), name])); const explicitTargets = new Set(); const cards = missionLines.map((line) => { const item = parseMissionLine(line); if (!item.target) return { target: "", mission: item.mission }; const target = nameByKey.get(normalizeName(item.target)); if (!target) throw new Error(`Cible inconnue : ${item.target}`); const key = normalizeName(target); if (explicitTargets.has(key)) throw new Error(`La cible ${target} est attribuée à plusieurs missions.`); explicitTargets.add(key); return { target, mission: item.mission }; }); const remainingTargets = shuffle(names.filter((name) => !explicitTargets.has(normalizeName(name)))); return cards.map((card) => (card.target ? card : { ...card, target: remainingTargets.shift() })); }
+function assignCardsToPlayers(names, missionCards) { const cardByTarget = new Map(missionCards.map((card) => [normalizeName(card.target), card])); const chain = shuffle(names); return names.map((name) => { const chainIndex = chain.findIndex((item) => normalizeName(item) === normalizeName(name)); const target = chain[(chainIndex + 1) % chain.length]; const card = cardByTarget.get(normalizeName(target)); if (!card) throw new Error(`Mission introuvable pour la cible ${target}.`); return card; }); }
+function buildPlayers(names, missionLines) { const missionCards = buildMissionCards(names, missionLines); const assignedCards = assignCardsToPlayers(names, missionCards); const codes = makePlayerCodes(names.length); return names.map((name, index) => ({ id: randomId("player"), name, target: assignedCards[index].target, mission: assignedCards[index].mission, code: codes[index], alive: true, kills: 0 })); }
+function targetMappingIsSingleCycle(players) { if (players.length < 2) return false; const byName = new Map(players.map((player) => [normalizeName(player.name), player])); const start = players[0]; const visited = new Set(); let current = start; for (let step = 0; step < players.length; step += 1) { const key = normalizeName(current.name); if (visited.has(key)) return false; visited.add(key); current = byName.get(normalizeName(current.target)); if (!current) return false; } return visited.size === players.length && normalizeName(current.name) === normalizeName(start.name); }
+function validateSetup(names, missionLines) { if (names.length < 2) return "Il faut au moins 2 joueurs."; if (new Set(names.map(normalizeName)).size !== names.length) return "Chaque joueur doit avoir un nom unique."; if (missionLines.length !== names.length) return `Il faut exactement autant de missions que de joueurs : ${names.length} joueur(s), ${missionLines.length} mission(s).`; try { const cards = buildMissionCards(names, missionLines); if (cards.some((card) => !card.mission)) return "Chaque ligne de mission doit contenir une mission."; if (new Set(cards.map((card) => normalizeName(card.target))).size !== names.length) return "Chaque joueur doit être ciblé exactement une fois."; if (!targetMappingIsSingleCycle(buildPlayers(names, missionLines))) return "Les cibles doivent former une seule chaîne complète."; } catch (error) { return error.message; } return ""; }
+function getPlayers(game) { return Object.values(game?.players || {}); }
+function getEvents(game) { return Object.values(game?.events || {}).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); }
+function getPendingKills(game) { return Object.values(game?.pendingKills || {}).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); }
+function getTimerRemaining(timer, now = Date.now()) { if (!timer) return DEFAULT_TIMER_SECONDS; const base = Number(timer.remainingSeconds ?? timer.durationSeconds ?? DEFAULT_TIMER_SECONDS); if (!timer.running || !timer.startedAt) return Math.max(0, base); return Math.max(0, base - Math.floor((now - Number(timer.startedAt)) / 1000)); }
+function formatTime(totalSeconds) { const seconds = Math.max(0, Number(totalSeconds) || 0); return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`; }
+async function copyText(text) { try { await navigator.clipboard.writeText(text); return true; } catch { return false; } }
 
 export default function App() {
   const [mode, setMode] = useState("home");
@@ -227,15 +72,20 @@ export default function App() {
   const [timerMinutes, setTimerMinutes] = useState("30");
   const [tick, setTick] = useState(Date.now());
   const [game, setGame] = useState(null);
+  const [allGames, setAllGames] = useState({});
   const [currentPlayerId, setCurrentPlayerId] = useState("");
   const [message, setMessage] = useState("");
   const [showCards, setShowCards] = useState(false);
   const [showPlayerRules, setShowPlayerRules] = useState(false);
   const [showAdminRules, setShowAdminRules] = useState(false);
+  const [generalAdminUser, setGeneralAdminUser] = useState("");
+  const [generalAdminPassword, setGeneralAdminPassword] = useState("");
+  const [generalAdminLoggedIn, setGeneralAdminLoggedIn] = useState(false);
 
   const players = useMemo(() => getPlayers(game), [game]);
   const events = useMemo(() => getEvents(game), [game]);
   const pendingKills = useMemo(() => getPendingKills(game), [game]);
+  const allGameRows = useMemo(() => Object.values(allGames || {}).sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)), [allGames]);
   const alivePlayers = players.filter((player) => player.alive);
   const deadCount = players.length - alivePlayers.length;
   const singleWinner = players.length > 0 && alivePlayers.length === 1 ? alivePlayers[0] : null;
@@ -250,267 +100,50 @@ export default function App() {
   const timer = game?.timer || { durationSeconds: DEFAULT_TIMER_SECONDS, remainingSeconds: DEFAULT_TIMER_SECONDS, running: false, startedAt: null };
   const remainingSeconds = getTimerRemaining(timer, tick);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => setTick(Date.now()), 1000);
-    return () => window.clearInterval(interval);
-  }, []);
+  useEffect(() => { const interval = window.setInterval(() => setTick(Date.now()), 1000); return () => window.clearInterval(interval); }, []);
+  useEffect(() => { const params = new URLSearchParams(window.location.search); const fromUrl = normalizeCode(params.get("game")); const privateCode = normalizeCode(params.get("player")); if (privateCode) { setPendingPrivateCode(privateCode); setPlayerCode(privateCode); } if (fromUrl) joinGame(fromUrl, "public"); }, []);
+  useEffect(() => { if (!db || !gameId) return undefined; return onValue(ref(db, `games/${gameId}`), (snapshot) => { const value = snapshot.val(); setGame(value); if (!value) setMessage("Aucune partie trouvée avec ce code."); }); }, [gameId]);
+  useEffect(() => { if (!db || !generalAdminLoggedIn) return undefined; return onValue(ref(db, "games"), (snapshot) => setAllGames(snapshot.val() || {})); }, [generalAdminLoggedIn]);
+  useEffect(() => { if (!pendingPrivateCode || !players.length) return; const player = players.find((item) => item.code.toUpperCase() === pendingPrivateCode); if (!player) return; setCurrentPlayerId(player.id); setMode("player"); setShowPlayerRules(true); setPendingPrivateCode(""); setMessage(`Bienvenue ${player.name}.`); }, [pendingPrivateCode, players]);
+  useEffect(() => { if (!db || !gameId || !game || game.status !== "active") return; if (!timer.running || remainingSeconds > 0 || alivePlayers.length <= 1) return; update(ref(db, `games/${gameId}`), { status: "finished_timeout", timer: { ...timer, remainingSeconds: 0, running: false, startedAt: null }, updatedAt: Date.now() }); }, [gameId, game?.status, timer.running, remainingSeconds, alivePlayers.length]);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const fromUrl = normalizeCode(params.get("game"));
-    const privateCode = normalizeCode(params.get("player"));
-    if (privateCode) {
-      setPendingPrivateCode(privateCode);
-      setPlayerCode(privateCode);
-    }
-    if (fromUrl) joinGame(fromUrl, "public");
-  }, []);
+  function ensureFirebase() { if (db) return true; setMessage("Firebase n'est pas configuré. Ajoute les variables VITE_FIREBASE_* dans Vercel ou dans ton fichier .env.local."); return false; }
+  function goToPublicGame() { if (!gameId) return setMode("home"); setMode("public"); window.history.replaceState({}, "", `?game=${gameId}`); }
+  function privateUrl(player) { return `${window.location.origin}${window.location.pathname}?game=${gameId}&player=${encodeURIComponent(player.code)}`; }
+  function gamePublicUrl(id) { return `${window.location.origin}${window.location.pathname}?game=${id}`; }
+  async function updateTimer(nextTimer) { if (!ensureFirebase()) return; if (!gameId || !isAdmin) return setMessage("Seul l’organisateur peut modifier le chrono."); await update(ref(db, `games/${gameId}`), { timer: nextTimer, updatedAt: Date.now(), status: game?.status === "finished_timeout" ? "active" : game?.status }); }
+  async function startTimer() { const durationSeconds = Math.round(Math.max(1, Number(timerMinutes) || 1) * 60); await updateTimer({ durationSeconds, remainingSeconds: remainingSeconds || durationSeconds, running: true, startedAt: Date.now() }); setMessage("Chrono lancé."); }
+  async function stopTimer() { await updateTimer({ ...timer, remainingSeconds, running: false, startedAt: null }); setMessage("Chrono stoppé."); }
+  async function resetTimer() { const durationSeconds = Math.round(Math.max(1, Number(timerMinutes) || 1) * 60); await updateTimer({ durationSeconds, remainingSeconds: durationSeconds, running: false, startedAt: null }); setMessage("Chrono réinitialisé."); }
 
-  useEffect(() => {
-    if (!db || !gameId) return undefined;
-    return onValue(ref(db, `games/${gameId}`), (snapshot) => {
-      const value = snapshot.val();
-      setGame(value);
-      if (!value) setMessage("Aucune partie trouvée avec ce code.");
-    });
-  }, [gameId]);
+  async function createGame() { if (!ensureFirebase()) return; setMessage(""); const names = parseLines(namesText); const missionLines = parseLines(missionsText); const error = validateSetup(names, missionLines); if (error) return setMessage(error); const id = makeGameCode(); const newAdminCode = makeAdminCode(); const now = Date.now(); const builtPlayers = buildPlayers(names, missionLines); const initialEventId = randomId("event"); await set(ref(db, `games/${id}`), { id, adminCode: newAdminCode, status: "active", createdAt: now, updatedAt: now, timer: { durationSeconds: DEFAULT_TIMER_SECONDS, remainingSeconds: DEFAULT_TIMER_SECONDS, running: false, startedAt: null }, players: Object.fromEntries(builtPlayers.map((player) => [player.id, player])), pendingKills: {}, events: { [initialEventId]: { id: initialEventId, text: "La partie a commencé. Les identités restent secrètes.", at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), createdAt: now } } }); setGameId(id); setGameIdInput(id); setAdminCode(newAdminCode); setTimerMinutes("30"); setMode("admin"); setShowAdminRules(false); window.history.replaceState({}, "", `?game=${id}`); setMessage(`Partie créée. Code partie : ${id}. Code admin : ${newAdminCode}.`); }
+  async function joinGame(id = gameIdInput, nextMode = "public") { if (!ensureFirebase()) return; const normalized = normalizeCode(id); setMessage(""); if (!normalized) return setMessage("Entre un code partie."); const snapshot = await get(ref(db, `games/${normalized}`)); if (!snapshot.exists()) return setMessage("Aucune partie trouvée avec ce code."); setGameId(normalized); setGameIdInput(normalized); setMode(nextMode); window.history.replaceState({}, "", `?game=${normalized}`); }
+  function loginGeneralAdmin() { if (!ensureFirebase()) return; if (!GENERAL_ADMIN_PASSWORD) return setMessage("Configure VITE_GENERAL_ADMIN_PASSWORD dans Vercel avant d'utiliser l'admin général."); if (generalAdminUser.trim() !== GENERAL_ADMIN_USER || generalAdminPassword !== GENERAL_ADMIN_PASSWORD) return setMessage("Login admin général incorrect."); setGeneralAdminLoggedIn(true); setMode("generalAdmin"); setMessage("Admin général connecté."); }
+  function logoutGeneralAdmin() { setGeneralAdminLoggedIn(false); setAllGames({}); setGeneralAdminPassword(""); setMode("home"); setMessage("Admin général déconnecté."); }
+  function openGameAsGeneralAdmin(selectedGame) { setGameId(selectedGame.id); setGameIdInput(selectedGame.id); setAdminCode(selectedGame.adminCode || ""); setMode("admin"); window.history.replaceState({}, "", `?game=${selectedGame.id}`); setMessage(`Partie ${selectedGame.id} ouverte en mode organisateur.`); }
+  async function deleteGameById(id) { if (!ensureFirebase()) return; if (!generalAdminLoggedIn) return setMessage("Connecte-toi comme admin général."); await set(ref(db, `games/${id}`), null); if (gameId === id) { setGame(null); setGameId(""); setGameIdInput(""); } setMessage(`Partie ${id} supprimée.`); }
+  function enterPlayer() { const player = players.find((item) => item.code.toUpperCase() === normalizeCode(playerCode)); if (!player) return setMessage("Code joueur inconnu."); setCurrentPlayerId(player.id); setMode("player"); setShowPlayerRules(true); setMessage(`Bienvenue ${player.name}.`); }
+  function enterAdmin() { if (!isAdmin) return setMessage("Code admin incorrect."); setMode("admin"); setMessage("Mode organisateur activé."); }
+  async function requestKill() { if (!ensureFirebase()) return; if (!currentPlayer) return setMessage("Connecte-toi comme joueur avant de déclarer un kill."); if (!currentPlayer.alive) return setMessage("Tu es éliminé, tu ne peux plus déclarer de kill."); const victim = players.find((player) => player.alive && normalizeName(player.name) === normalizeName(currentPlayer.target)); if (!victim) return setMessage("Ta cible actuelle est introuvable ou déjà éliminée."); const duplicate = pendingKills.find((request) => request.status === "pending" && request.killerId === currentPlayer.id && request.victimId === victim.id); if (duplicate) return setMessage("Tu as déjà envoyé une demande à cette cible. Attends sa réponse."); const requestId = randomId("kill"); await set(ref(db, `games/${gameId}/pendingKills/${requestId}`), { id: requestId, killerId: currentPlayer.id, killerName: currentPlayer.name, victimId: victim.id, victimName: victim.name, mission: currentPlayer.mission, status: "pending", createdAt: Date.now() }); setMessage(""); }
+  async function refuseKillRequest(request) { if (!ensureFirebase()) return; await update(ref(db, `games/${gameId}/pendingKills/${request.id}`), { status: "refused", respondedAt: Date.now() }); setMessage("Demande refusée. Aucun kill n’a été validé."); }
+  async function acceptKillRequest(request) { if (!ensureFirebase()) return; const killer = players.find((player) => player.id === request.killerId); const victim = players.find((player) => player.id === request.victimId); if (!killer || !victim) return setMessage("Demande invalide : joueur introuvable."); if (!victim.alive) return setMessage("Cette demande n’est plus valide : tu es déjà éliminé."); if (!killer.alive) return setMessage("Cette demande n’est plus valide : le killer est déjà éliminé."); const now = Date.now(); const remainingAfterKill = alivePlayers.length - 1; const eventId = randomId("event"); await update(ref(db, `games/${gameId}/players/${victim.id}`), { alive: false, updatedAt: now }); await update(ref(db, `games/${gameId}/players/${killer.id}`), { kills: (killer.kills || 0) + 1, target: victim.target, mission: victim.mission, updatedAt: now }); await update(ref(db, `games/${gameId}/pendingKills/${request.id}`), { status: "accepted", respondedAt: now }); await set(ref(db, `games/${gameId}/events/${eventId}`), { id: eventId, text: `Une personne a été killée. Il reste ${remainingAfterKill} survivant(s).`, at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), createdAt: now }); const gameUpdate = { status: remainingAfterKill === 1 ? "finished" : "active", updatedAt: now }; if (remainingAfterKill === 1) gameUpdate.timer = { ...timer, remainingSeconds, running: false, startedAt: null }; await update(ref(db, `games/${gameId}`), gameUpdate); setMessage(remainingAfterKill === 1 ? "Kill accepté. Le chrono est arrêté. On a un vainqueur !" : "Kill accepté. Ton assassin récupère ta cible et ta mission."); }
+  async function deleteGame() { if (!ensureFirebase()) return; if (!isAdmin) return setMessage("Seul l’organisateur peut supprimer la partie."); await set(ref(db, `games/${gameId}`), null); setGame(null); setGameId(""); setGameIdInput(""); setAdminCode(""); setCurrentPlayerId(""); setMode("home"); window.history.replaceState({}, "", window.location.pathname); setMessage("Partie supprimée."); }
+  function playerSheet(player) { return `KILLER\nJoueur : ${player.name}\nLien privé : ${privateUrl(player)}\nCode joueur : ${player.code}\nCible actuelle : ${player.target}\nMission actuelle : ${player.mission}`; }
+  async function copySheet(player) { const ok = await copyText(playerSheet(player)); setMessage(ok ? `Fiche privée de ${player.name} copiée.` : playerSheet(player)); }
+  async function copyPrivateLink(player) { const ok = await copyText(privateUrl(player)); setMessage(ok ? `Lien privé de ${player.name} copié.` : privateUrl(player)); }
+  async function copyLink() { const ok = await copyText(publicUrl); setMessage(ok ? "Lien public copié." : publicUrl); }
+  async function copyGameLink(id) { const ok = await copyText(gamePublicUrl(id)); setMessage(ok ? `Lien public ${id} copié.` : gamePublicUrl(id)); }
 
-  useEffect(() => {
-    if (!pendingPrivateCode || !players.length) return;
-    const player = players.find((item) => item.code.toUpperCase() === pendingPrivateCode);
-    if (!player) return;
-    setCurrentPlayerId(player.id);
-    setMode("player");
-    setShowPlayerRules(true);
-    setPendingPrivateCode("");
-    setMessage(`Bienvenue ${player.name}.`);
-  }, [pendingPrivateCode, players]);
-
-  useEffect(() => {
-    if (!db || !gameId || !game || game.status !== "active") return;
-    if (!timer.running || remainingSeconds > 0 || alivePlayers.length <= 1) return;
-    update(ref(db, `games/${gameId}`), {
-      status: "finished_timeout",
-      timer: { ...timer, remainingSeconds: 0, running: false, startedAt: null },
-      updatedAt: Date.now(),
-    });
-  }, [gameId, game?.status, timer.running, remainingSeconds, alivePlayers.length]);
-
-  function ensureFirebase() {
-    if (db) return true;
-    setMessage("Firebase n'est pas configuré. Ajoute les variables VITE_FIREBASE_* dans Vercel ou dans ton fichier .env.local.");
-    return false;
-  }
-
-  function goToPublicGame() {
-    if (!gameId) return setMode("home");
-    setMode("public");
-    window.history.replaceState({}, "", `?game=${gameId}`);
-  }
-
-  function privateUrl(player) {
-    return `${window.location.origin}${window.location.pathname}?game=${gameId}&player=${encodeURIComponent(player.code)}`;
-  }
-
-  async function updateTimer(nextTimer) {
-    if (!ensureFirebase()) return;
-    if (!gameId || !isAdmin) return setMessage("Seul l’organisateur peut modifier le chrono.");
-    await update(ref(db, `games/${gameId}`), {
-      timer: nextTimer,
-      updatedAt: Date.now(),
-      status: game?.status === "finished_timeout" ? "active" : game?.status,
-    });
-  }
-
-  async function startTimer() {
-    const durationSeconds = Math.round(Math.max(1, Number(timerMinutes) || 1) * 60);
-    await updateTimer({ durationSeconds, remainingSeconds: remainingSeconds || durationSeconds, running: true, startedAt: Date.now() });
-    setMessage("Chrono lancé.");
-  }
-
-  async function stopTimer() {
-    await updateTimer({ ...timer, remainingSeconds, running: false, startedAt: null });
-    setMessage("Chrono stoppé.");
-  }
-
-  async function resetTimer() {
-    const durationSeconds = Math.round(Math.max(1, Number(timerMinutes) || 1) * 60);
-    await updateTimer({ durationSeconds, remainingSeconds: durationSeconds, running: false, startedAt: null });
-    setMessage("Chrono réinitialisé.");
-  }
-
-  async function createGame() {
-    if (!ensureFirebase()) return;
-    setMessage("");
-    const names = parseLines(namesText);
-    const missionLines = parseLines(missionsText);
-    const error = validateSetup(names, missionLines);
-    if (error) return setMessage(error);
-    const id = makeGameCode();
-    const newAdminCode = makeAdminCode();
-    const now = Date.now();
-    const builtPlayers = buildPlayers(names, missionLines);
-    const initialEventId = randomId("event");
-    await set(ref(db, `games/${id}`), {
-      id,
-      adminCode: newAdminCode,
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-      timer: { durationSeconds: DEFAULT_TIMER_SECONDS, remainingSeconds: DEFAULT_TIMER_SECONDS, running: false, startedAt: null },
-      players: Object.fromEntries(builtPlayers.map((player) => [player.id, player])),
-      pendingKills: {},
-      events: { [initialEventId]: { id: initialEventId, text: "La partie a commencé. Les identités restent secrètes.", at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), createdAt: now } },
-    });
-    setGameId(id);
-    setGameIdInput(id);
-    setAdminCode(newAdminCode);
-    setTimerMinutes("30");
-    setMode("admin");
-    setShowAdminRules(false);
-    window.history.replaceState({}, "", `?game=${id}`);
-    setMessage(`Partie créée. Code partie : ${id}. Code admin : ${newAdminCode}.`);
-  }
-
-  async function joinGame(id = gameIdInput, nextMode = "public") {
-    if (!ensureFirebase()) return;
-    const normalized = normalizeCode(id);
-    setMessage("");
-    if (!normalized) return setMessage("Entre un code partie.");
-    const snapshot = await get(ref(db, `games/${normalized}`));
-    if (!snapshot.exists()) return setMessage("Aucune partie trouvée avec ce code.");
-    setGameId(normalized);
-    setGameIdInput(normalized);
-    setMode(nextMode);
-    window.history.replaceState({}, "", `?game=${normalized}`);
-  }
-
-  function enterPlayer() {
-    const player = players.find((item) => item.code.toUpperCase() === normalizeCode(playerCode));
-    if (!player) return setMessage("Code joueur inconnu.");
-    setCurrentPlayerId(player.id);
-    setMode("player");
-    setShowPlayerRules(true);
-    setMessage(`Bienvenue ${player.name}.`);
-  }
-
-  function enterAdmin() {
-    if (!isAdmin) return setMessage("Code admin incorrect.");
-    setMode("admin");
-    setMessage("Mode organisateur activé.");
-  }
-
-  async function requestKill() {
-    if (!ensureFirebase()) return;
-    if (!currentPlayer) return setMessage("Connecte-toi comme joueur avant de déclarer un kill.");
-    if (!currentPlayer.alive) return setMessage("Tu es éliminé, tu ne peux plus déclarer de kill.");
-    const victim = players.find((player) => player.alive && normalizeName(player.name) === normalizeName(currentPlayer.target));
-    if (!victim) return setMessage("Ta cible actuelle est introuvable ou déjà éliminée.");
-    const duplicate = pendingKills.find((request) => request.status === "pending" && request.killerId === currentPlayer.id && request.victimId === victim.id);
-    if (duplicate) return setMessage("Tu as déjà envoyé une demande à cette cible. Attends sa réponse.");
-    const requestId = randomId("kill");
-    await set(ref(db, `games/${gameId}/pendingKills/${requestId}`), {
-      id: requestId,
-      killerId: currentPlayer.id,
-      killerName: currentPlayer.name,
-      victimId: victim.id,
-      victimName: victim.name,
-      mission: currentPlayer.mission,
-      status: "pending",
-      createdAt: Date.now(),
-    });
-    setMessage("");
-  }
-
-  async function refuseKillRequest(request) {
-    if (!ensureFirebase()) return;
-    await update(ref(db, `games/${gameId}/pendingKills/${request.id}`), { status: "refused", respondedAt: Date.now() });
-    setMessage("Demande refusée. Aucun kill n’a été validé.");
-  }
-
-  async function acceptKillRequest(request) {
-    if (!ensureFirebase()) return;
-    const killer = players.find((player) => player.id === request.killerId);
-    const victim = players.find((player) => player.id === request.victimId);
-    if (!killer || !victim) return setMessage("Demande invalide : joueur introuvable.");
-    if (!victim.alive) return setMessage("Cette demande n’est plus valide : tu es déjà éliminé.");
-    if (!killer.alive) return setMessage("Cette demande n’est plus valide : le killer est déjà éliminé.");
-    const now = Date.now();
-    const remainingAfterKill = alivePlayers.length - 1;
-    const eventId = randomId("event");
-    await update(ref(db, `games/${gameId}/players/${victim.id}`), { alive: false, updatedAt: now });
-    await update(ref(db, `games/${gameId}/players/${killer.id}`), { kills: (killer.kills || 0) + 1, target: victim.target, mission: victim.mission, updatedAt: now });
-    await update(ref(db, `games/${gameId}/pendingKills/${request.id}`), { status: "accepted", respondedAt: now });
-    await set(ref(db, `games/${gameId}/events/${eventId}`), { id: eventId, text: `Une personne a été killée. Il reste ${remainingAfterKill} survivant(s).`, at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), createdAt: now });
-    const gameUpdate = { status: remainingAfterKill === 1 ? "finished" : "active", updatedAt: now };
-    if (remainingAfterKill === 1) gameUpdate.timer = { ...timer, remainingSeconds, running: false, startedAt: null };
-    await update(ref(db, `games/${gameId}`), gameUpdate);
-    setMessage(remainingAfterKill === 1 ? "Kill accepté. Le chrono est arrêté. On a un vainqueur !" : "Kill accepté. Ton assassin récupère ta cible et ta mission.");
-  }
-
-  async function deleteGame() {
-    if (!ensureFirebase()) return;
-    if (!isAdmin) return setMessage("Seul l’organisateur peut supprimer la partie.");
-    await set(ref(db, `games/${gameId}`), null);
-    setGame(null);
-    setGameId("");
-    setGameIdInput("");
-    setAdminCode("");
-    setCurrentPlayerId("");
-    setMode("home");
-    window.history.replaceState({}, "", window.location.pathname);
-    setMessage("Partie supprimée.");
-  }
-
-  function playerSheet(player) {
-    return `KILLER\nJoueur : ${player.name}\nLien privé : ${privateUrl(player)}\nCode joueur : ${player.code}\nCible actuelle : ${player.target}\nMission actuelle : ${player.mission}`;
-  }
-
-  async function copySheet(player) {
-    const ok = await copyText(playerSheet(player));
-    setMessage(ok ? `Fiche privée de ${player.name} copiée.` : playerSheet(player));
-  }
-
-  async function copyPrivateLink(player) {
-    const ok = await copyText(privateUrl(player));
-    setMessage(ok ? `Lien privé de ${player.name} copié.` : privateUrl(player));
-  }
-
-  async function copyLink() {
-    const ok = await copyText(publicUrl);
-    setMessage(ok ? "Lien public copié." : publicUrl);
-  }
-
-  function RulesPanel({ onClose }) {
-    return (
-      <Card className="border-yellow-800 bg-yellow-950/20">
-        <div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-black text-yellow-100">Règles du Killer</h2><p className="mt-1 text-sm text-yellow-100/70">Lis bien avant de jouer. Tu peux rouvrir ces règles à tout moment.</p></div><Button variant="ghost" onClick={onClose}>Fermer</Button></div>
-        <div className="mt-4 grid gap-3 text-sm text-zinc-100 md:grid-cols-2"><div className="rounded-2xl bg-zinc-950/80 p-4"><strong>1. Ton objectif</strong><p className="mt-1 text-zinc-300">Tu as une cible secrète et une mission. Réussis ta mission auprès de ta cible sans te faire griller.</p></div><div className="rounded-2xl bg-zinc-950/80 p-4"><strong>2. Déclarer un kill</strong><p className="mt-1 text-zinc-300">Quand tu penses avoir réussi, clique sur “Envoyer la demande à ma cible”. Ta cible reçoit une notification privée.</p></div><div className="rounded-2xl bg-zinc-950/80 p-4"><strong>3. Validation</strong><p className="mt-1 text-zinc-300">Le kill n’est validé que si la cible accepte. Si elle refuse, rien ne change et vous pouvez demander à l’admin de trancher.</p></div><div className="rounded-2xl bg-zinc-950/80 p-4"><strong>4. Après un kill</strong><p className="mt-1 text-zinc-300">Le killer récupère automatiquement la cible et la mission du joueur éliminé. La chaîne continue jusqu’à la fin.</p></div><div className="rounded-2xl bg-zinc-950/80 p-4 md:col-span-2"><strong>5. Fin de partie</strong><p className="mt-1 text-zinc-300">S’il ne reste qu’un joueur, il gagne. Si le chrono termine avant, tous les survivants sont déclarés vainqueurs.</p></div></div>
-      </Card>
-    );
-  }
-
-  function TimerPanel({ admin = false, compact = false }) {
-    if (compact) return <Card className="p-3"><div className="flex items-center justify-between gap-3"><div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Chrono</div><div className={remainingSeconds === 0 || hasFinalWinners ? "font-mono text-3xl font-black text-yellow-100" : "font-mono text-3xl font-black"}>{formatTime(remainingSeconds)}</div></div><Badge className={timer.running ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-zinc-700 bg-zinc-800 text-zinc-100"}>{timer.running ? "ON" : "OFF"}</Badge></div></Card>;
-    return <Card><div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-black">Chrono</h2><p className="text-sm text-zinc-400">{hasFinalWinners ? "Arrêté — victoire" : timer.running ? "En cours" : remainingSeconds === 0 ? "Terminé" : "En pause"}</p></div><Badge className={timer.running ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-zinc-700 bg-zinc-800 text-zinc-100"}>{timer.running ? "ON" : "OFF"}</Badge></div><div className={remainingSeconds === 0 || hasFinalWinners ? "mt-4 rounded-2xl border border-yellow-700 bg-yellow-950/40 p-5 text-center font-mono text-6xl font-black text-yellow-100" : "mt-4 rounded-2xl bg-zinc-950 p-5 text-center font-mono text-6xl font-black"}>{formatTime(remainingSeconds)}</div>{admin ? <div className="mt-4 space-y-3"><label className="block text-sm text-zinc-400">Durée en minutes</label><Field type="number" min="1" value={timerMinutes} onChange={(event) => setTimerMinutes(event.target.value)} /><div className="grid gap-2 sm:grid-cols-3"><Button onClick={startTimer}>Lancer</Button><Button variant="outline" onClick={stopTimer}>Stopper</Button><Button variant="ghost" onClick={resetTimer}>Réinitialiser</Button></div></div> : null}</Card>;
-  }
-
-  function PublicBoard({ compact = false }) {
-    if (compact) {
-      return <Card className="p-3"><div className="flex items-center justify-between gap-3"><div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Écran public</div><div className="text-sm text-zinc-400">{gameId || "—"}</div></div><div className="flex gap-2"><Badge className="border-emerald-800 bg-emerald-950 text-emerald-200">{alivePlayers.length} en vie</Badge><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">{deadCount} kill(s)</Badge></div></div>{hasFinalWinners ? <div className="mt-3 rounded-xl border border-yellow-700 bg-yellow-950/40 p-3 text-center text-yellow-100"><div className="text-xs uppercase tracking-[0.25em] text-yellow-300/80">{finalWinners.length > 1 ? "Vainqueurs" : "Vainqueur"}</div><div className="mt-1 text-xl font-black">{finalWinners.map((player) => player.name).join(" · ")}</div></div> : events[0] ? <div className="mt-3 rounded-xl bg-zinc-950 p-3 text-xs text-zinc-300"><span className="text-zinc-500">{events[0].at}</span> — {events[0].text}</div> : null}</Card>;
-    }
-    return <Card><div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-black">Écran public</h2><p className="text-sm text-zinc-400">Code partie : <span className="font-mono text-zinc-200">{gameId || "—"}</span></p></div><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">Live</Badge></div>{hasFinalWinners ? <div className="mt-5 rounded-3xl border border-yellow-600 bg-yellow-950/50 p-6 text-center text-yellow-100"><div className="text-5xl">👑</div><div className="mt-3 text-sm uppercase tracking-[0.35em] text-yellow-300/80">{finalWinners.length > 1 ? "Vainqueurs" : "Vainqueur"}</div><div className="mt-2 text-5xl font-black">{finalWinners.map((player) => player.name).join(" · ")}</div><p className="mt-3 text-sm text-yellow-100/80">{timeoutFinished ? "Le chrono est terminé. Les derniers survivants remportent la partie." : "Le chrono est arrêté. La duperie a son roi."}</p></div> : <><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{alivePlayers.length}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">survivants</div></div><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{deadCount}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">kills</div></div></div><div className="mt-4 space-y-2">{events.length === 0 ? <p className="text-sm text-zinc-500">Aucun événement pour l’instant.</p> : null}{events.map((event) => <div key={event.id} className="rounded-xl bg-zinc-950 p-3 text-sm"><span className="text-zinc-500">{event.at}</span> — {event.text}</div>)}</div></>}</Card>;
-  }
-
-  function KillRequestsPanel() {
-    if (!currentPlayer) return null;
-    return <Card><h2 className="text-2xl font-black">Notifications de kill</h2>{currentPlayerRequests.length === 0 ? <p className="mt-2 text-sm text-zinc-400">Aucune demande reçue.</p> : null}<div className="mt-4 space-y-3">{currentPlayerRequests.map((request) => <div key={request.id} className="rounded-2xl border border-yellow-800 bg-yellow-950/30 p-4"><div className="font-bold text-yellow-100">{request.killerName} affirme t’avoir killé.</div><p className="mt-2 text-sm text-yellow-100/80">Mission : {request.mission}</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><Button variant="success" onClick={() => acceptKillRequest(request)}>Accepter le kill</Button><Button variant="outline" onClick={() => refuseKillRequest(request)}>Refuser</Button></div></div>)}{outgoingRequests.map((request) => <div key={request.id} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-300">Demande envoyée à <strong>{request.victimName}</strong>. En attente de validation.</div>)}</div></Card>;
-  }
+  function RulesPanel({ onClose }) { return <Card className="border-yellow-800 bg-yellow-950/20"><div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-black text-yellow-100">Règles du Killer</h2><p className="mt-1 text-sm text-yellow-100/70">Lis bien avant de jouer. Tu peux rouvrir ces règles à tout moment.</p></div><Button variant="ghost" onClick={onClose}>Fermer</Button></div><div className="mt-4 grid gap-3 text-sm text-zinc-100 md:grid-cols-2"><div className="rounded-2xl bg-zinc-950/80 p-4"><strong>1. Ton objectif</strong><p className="mt-1 text-zinc-300">Tu as une cible secrète et une mission. Réussis ta mission auprès de ta cible sans te faire griller.</p></div><div className="rounded-2xl bg-zinc-950/80 p-4"><strong>2. Déclarer un kill</strong><p className="mt-1 text-zinc-300">Quand tu penses avoir réussi, clique sur “Envoyer la demande à ma cible”. Ta cible reçoit une notification privée.</p></div><div className="rounded-2xl bg-zinc-950/80 p-4"><strong>3. Validation</strong><p className="mt-1 text-zinc-300">Le kill n’est validé que si la cible accepte. Si elle refuse, rien ne change et vous pouvez demander à l’admin de trancher.</p></div><div className="rounded-2xl bg-zinc-950/80 p-4"><strong>4. Après un kill</strong><p className="mt-1 text-zinc-300">Le killer récupère automatiquement la cible et la mission du joueur éliminé. La chaîne continue jusqu’à la fin.</p></div><div className="rounded-2xl bg-zinc-950/80 p-4 md:col-span-2"><strong>5. Fin de partie</strong><p className="mt-1 text-zinc-300">S’il ne reste qu’un joueur, il gagne. Si le chrono termine avant, tous les survivants sont déclarés vainqueurs.</p></div></div></Card>; }
+  function TimerPanel({ admin = false, compact = false }) { if (compact) return <Card className="p-3"><div className="flex items-center justify-between gap-3"><div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Chrono</div><div className={remainingSeconds === 0 || hasFinalWinners ? "font-mono text-3xl font-black text-yellow-100" : "font-mono text-3xl font-black"}>{formatTime(remainingSeconds)}</div></div><Badge className={timer.running ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-zinc-700 bg-zinc-800 text-zinc-100"}>{timer.running ? "ON" : "OFF"}</Badge></div></Card>; return <Card><div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-black">Chrono</h2><p className="text-sm text-zinc-400">{hasFinalWinners ? "Arrêté — victoire" : timer.running ? "En cours" : remainingSeconds === 0 ? "Terminé" : "En pause"}</p></div><Badge className={timer.running ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-zinc-700 bg-zinc-800 text-zinc-100"}>{timer.running ? "ON" : "OFF"}</Badge></div><div className={remainingSeconds === 0 || hasFinalWinners ? "mt-4 rounded-2xl border border-yellow-700 bg-yellow-950/40 p-5 text-center font-mono text-6xl font-black text-yellow-100" : "mt-4 rounded-2xl bg-zinc-950 p-5 text-center font-mono text-6xl font-black"}>{formatTime(remainingSeconds)}</div>{admin ? <div className="mt-4 space-y-3"><label className="block text-sm text-zinc-400">Durée en minutes</label><Field type="number" min="1" value={timerMinutes} onChange={(event) => setTimerMinutes(event.target.value)} /><div className="grid gap-2 sm:grid-cols-3"><Button onClick={startTimer}>Lancer</Button><Button variant="outline" onClick={stopTimer}>Stopper</Button><Button variant="ghost" onClick={resetTimer}>Réinitialiser</Button></div></div> : null}</Card>; }
+  function PublicBoard({ compact = false }) { if (compact) return <Card className="p-3"><div className="flex items-center justify-between gap-3"><div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Écran public</div><div className="text-sm text-zinc-400">{gameId || "—"}</div></div><div className="flex gap-2"><Badge className="border-emerald-800 bg-emerald-950 text-emerald-200">{alivePlayers.length} en vie</Badge><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">{deadCount} kill(s)</Badge></div></div>{hasFinalWinners ? <div className="mt-3 rounded-xl border border-yellow-700 bg-yellow-950/40 p-3 text-center text-yellow-100"><div className="text-xs uppercase tracking-[0.25em] text-yellow-300/80">{finalWinners.length > 1 ? "Vainqueurs" : "Vainqueur"}</div><div className="mt-1 text-xl font-black">{finalWinners.map((player) => player.name).join(" · ")}</div></div> : events[0] ? <div className="mt-3 rounded-xl bg-zinc-950 p-3 text-xs text-zinc-300"><span className="text-zinc-500">{events[0].at}</span> — {events[0].text}</div> : null}</Card>; return <Card><div className="flex items-start justify-between gap-4"><div><h2 className="text-2xl font-black">Écran public</h2><p className="text-sm text-zinc-400">Code partie : <span className="font-mono text-zinc-200">{gameId || "—"}</span></p></div><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">Live</Badge></div>{hasFinalWinners ? <div className="mt-5 rounded-3xl border border-yellow-600 bg-yellow-950/50 p-6 text-center text-yellow-100"><div className="text-5xl">👑</div><div className="mt-3 text-sm uppercase tracking-[0.35em] text-yellow-300/80">{finalWinners.length > 1 ? "Vainqueurs" : "Vainqueur"}</div><div className="mt-2 text-5xl font-black">{finalWinners.map((player) => player.name).join(" · ")}</div><p className="mt-3 text-sm text-yellow-100/80">{timeoutFinished ? "Le chrono est terminé. Les derniers survivants remportent la partie." : "Le chrono est arrêté. La duperie a son roi."}</p></div> : <><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{alivePlayers.length}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">survivants</div></div><div className="rounded-xl bg-zinc-950 p-4 text-center"><div className="text-4xl font-black">{deadCount}</div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">kills</div></div></div><div className="mt-4 space-y-2">{events.length === 0 ? <p className="text-sm text-zinc-500">Aucun événement pour l’instant.</p> : null}{events.map((event) => <div key={event.id} className="rounded-xl bg-zinc-950 p-3 text-sm"><span className="text-zinc-500">{event.at}</span> — {event.text}</div>)}</div></>}</Card>; }
+  function KillRequestsPanel() { if (!currentPlayer) return null; return <Card><h2 className="text-2xl font-black">Notifications de kill</h2>{currentPlayerRequests.length === 0 ? <p className="mt-2 text-sm text-zinc-400">Aucune demande reçue.</p> : null}<div className="mt-4 space-y-3">{currentPlayerRequests.map((request) => <div key={request.id} className="rounded-2xl border border-yellow-800 bg-yellow-950/30 p-4"><div className="font-bold text-yellow-100">{request.killerName} affirme t’avoir killé.</div><p className="mt-2 text-sm text-yellow-100/80">Mission : {request.mission}</p><div className="mt-4 grid gap-2 sm:grid-cols-2"><Button variant="success" onClick={() => acceptKillRequest(request)}>Accepter le kill</Button><Button variant="outline" onClick={() => refuseKillRequest(request)}>Refuser</Button></div></div>)}{outgoingRequests.map((request) => <div key={request.id} className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-300">Demande envoyée à <strong>{request.victimName}</strong>. En attente de validation.</div>)}</div></Card>; }
+  function GeneralAdminDashboard() { return <div className="space-y-4"><Card><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h2 className="text-2xl font-black">Admin général</h2><p className="mt-1 text-sm text-zinc-400">Gestion de toutes les parties enregistrées dans Firebase.</p></div><Button variant="outline" onClick={logoutGeneralAdmin}>Déconnexion</Button></div></Card>{allGameRows.length === 0 ? <Card><p className="text-sm text-zinc-400">Aucune partie trouvée.</p></Card> : null}<div className="grid gap-3">{allGameRows.map((item) => { const rowPlayers = getPlayers(item); const rowAlive = rowPlayers.filter((player) => player.alive); const statusLabel = item.status === "active" ? "En cours" : item.status === "finished_timeout" ? "Fin chrono" : item.status === "finished" ? "Terminée" : item.status || "Inconnue"; return <Card key={item.id}><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-mono text-2xl font-black">{item.id}</h3><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">{statusLabel}</Badge></div><p className="mt-2 text-sm text-zinc-400">{rowAlive.length}/{rowPlayers.length} joueur(s) en vie · Admin : <span className="font-mono">{item.adminCode || "—"}</span></p><p className="mt-1 break-all text-xs text-zinc-500">{gamePublicUrl(item.id)}</p></div><div className="grid gap-2 sm:grid-cols-3"><Button onClick={() => openGameAsGeneralAdmin(item)}>Ouvrir admin</Button><Button variant="outline" onClick={() => copyGameLink(item.id)}>Copier lien</Button><Button variant="danger" onClick={() => deleteGameById(item.id)}>Supprimer</Button></div></div></Card>; })}</div></div>; }
 
   return (
     <main className="min-h-screen bg-zinc-950 p-4 text-zinc-50 sm:p-8"><div className="mx-auto max-w-5xl space-y-6"><header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><button type="button" onClick={goToPublicGame} className="text-left text-5xl font-black tracking-tight sm:text-6xl">Killer</button><p className="mt-2 max-w-2xl text-zinc-400">Qui sera le roi de la duperie ?</p></div><Badge className="border-zinc-700 bg-zinc-800 text-zinc-100">{game ? `${alivePlayers.length}/${players.length} en vie` : "Multi-téléphone"}</Badge></header>{message ? <div className="whitespace-pre-wrap rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-200">{message}</div> : null}
-
-      {mode === "home" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC12" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Les cibles forment une seule chaîne complète.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card></div> : null}
+      {mode === "home" ? <div className="grid gap-4 lg:grid-cols-3"><Card><h2 className="text-xl font-bold">Rejoindre une partie</h2><p className="mt-2 text-sm text-zinc-400">Entre le code partie, puis ton code joueur secret.</p><Field className="mt-4 font-mono uppercase" value={gameIdInput} onChange={(event) => setGameIdInput(normalizeCode(event.target.value))} placeholder="DUP-ABC12" /><Button className="mt-4 w-full" onClick={() => joinGame(gameIdInput, "public")}>Rejoindre</Button></Card><Card><h2 className="text-xl font-bold">Créer la partie</h2><p className="mt-2 text-sm text-zinc-400">Nombre de joueurs libre. Les cibles forment une seule chaîne complète.</p><Button className="mt-4 w-full" variant="outline" onClick={() => setMode("setup")}>Préparer les joueurs</Button></Card><Card><h2 className="text-xl font-bold">Admin général</h2><p className="mt-2 text-sm text-zinc-400">Gérer les parties en cours.</p><Field className="mt-4" value={generalAdminUser} onChange={(event) => setGeneralAdminUser(event.target.value)} placeholder="Login" /><Field className="mt-2" type="password" value={generalAdminPassword} onChange={(event) => setGeneralAdminPassword(event.target.value)} placeholder="Mot de passe" /><Button className="mt-4 w-full" variant="outline" onClick={loginGeneralAdmin}>Connexion admin</Button></Card></div> : null}
+      {mode === "generalAdmin" && generalAdminLoggedIn ? <GeneralAdminDashboard /> : null}
       {mode === "setup" ? <div className="grid gap-4 lg:grid-cols-2"><Card><h2 className="text-xl font-bold">Les joueurs</h2><p className="mt-2 text-sm text-zinc-400">Un nom par ligne. Minimum 2 joueurs.</p><Field as="textarea" className="mt-4 min-h-60" value={namesText} onChange={(event) => setNamesText(event.target.value)} /></Card><Card><h2 className="text-xl font-bold">Les missions</h2><p className="mt-2 text-sm text-zinc-400">Format : <span className="font-mono text-zinc-200">Nom cible | Mission</span>. L’app construit ensuite une chaîne complète de cibles.</p><Field as="textarea" className="mt-4 min-h-60" value={missionsText} onChange={(event) => setMissionsText(event.target.value)} /></Card><div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row"><Button onClick={createGame}>Créer la partie live</Button><Button variant="ghost" onClick={() => setMode("home")}>Retour</Button></div></div> : null}
       {game && mode === "public" ? <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"><Card><h2 className="text-2xl font-black">Connexion joueur</h2><p className="mt-2 text-sm text-zinc-400">Entre ton code joueur pour voir ta fiche, ou ouvre ton lien privé.</p><Field className="mt-4 font-mono uppercase" value={playerCode} onChange={(event) => setPlayerCode(event.target.value.toUpperCase())} placeholder="DRAGON-8" /><Button className="mt-4 w-full" onClick={enterPlayer}>Voir ma fiche</Button><div className="mt-6 border-t border-zinc-800 pt-4"><h3 className="font-bold">Organisateur</h3><Field className="mt-3 font-mono uppercase" value={adminCode} onChange={(event) => setAdminCode(event.target.value.toUpperCase())} placeholder="Code admin" /><Button className="mt-3 w-full" variant="outline" onClick={enterAdmin}>Mode organisateur</Button></div></Card><div className="space-y-4"><TimerPanel /><PublicBoard /></div></div> : null}
       {game && mode === "player" && currentPlayer ? <div className="space-y-4"><TimerPanel compact /><PublicBoard compact />{showPlayerRules ? <RulesPanel onClose={() => setShowPlayerRules(false)} /> : null}<div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]"><div className="space-y-4"><Card><div className="flex items-start justify-between gap-4"><h2 className="text-2xl font-black">Ta fiche secrète</h2><Button variant="outline" onClick={() => setShowPlayerRules(true)}>Voir les règles</Button></div><div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950 p-5"><div className="flex items-start justify-between gap-4"><div><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Joueur</div><div className="text-3xl font-black">{currentPlayer.name}</div></div><Badge className={currentPlayer.alive ? "border-emerald-800 bg-emerald-950 text-emerald-200" : "border-red-800 bg-red-950 text-red-200"}>{currentPlayer.alive ? "En vie" : "Killé"}</Badge></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta cible actuelle</div><div className="mt-1 text-xl font-bold">{currentPlayer.alive ? currentPlayer.target : "—"}</div></div><div className="rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ton code secret</div><div className="mt-1 font-mono text-xl font-bold">{currentPlayer.code}</div></div></div><div className="mt-3 rounded-xl bg-zinc-900 p-4"><div className="text-xs uppercase tracking-[0.25em] text-zinc-500">Ta mission actuelle</div><p className="mt-2 text-lg leading-relaxed">{currentPlayer.alive ? currentPlayer.mission : "Tu es éliminé."}</p></div></div></Card></div><div className="space-y-4"><KillRequestsPanel /><Card><h2 className="text-2xl font-black">Déclarer un kill</h2><p className="mt-2 text-sm text-zinc-400">Quand ta mission est réussie, envoie une demande discrète à ta cible. Elle devra accepter pour valider.</p><Button className="mt-4 w-full" onClick={requestKill} disabled={!currentPlayer.alive || hasFinalWinners}>Envoyer la demande à ma cible</Button><Button className="mt-2 w-full" variant="ghost" onClick={() => setMode("public")}>Retour écran public</Button></Card></div></div></div> : null}
